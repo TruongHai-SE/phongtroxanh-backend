@@ -88,6 +88,10 @@ app:
   geocoding:
     goong-api-key: ${GOONG_API_KEY:}
 
+  oauth2:
+    google:
+      client-id: ${GOOGLE_CLIENT_ID:}
+
 management:
   endpoints:
     web:

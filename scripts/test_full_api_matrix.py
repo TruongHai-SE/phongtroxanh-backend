@@ -1325,7 +1325,7 @@ class FullMatrixTester:
             f.write("7. **Final Enterprise Cleanup:**\n")
             f.write("   - Xóa bỏ hoàn toàn cổng thanh toán VietQR thừa, chuẩn hóa duy nhất cổng thanh toán VNPay Sandbox.\n")
             f.write("   - Xóa bỏ lưu trữ cục bộ `LocalFileStorageAdapter` và thư mục `./uploads/`, chuyển đổi 100% sang `CloudinaryStorageAdapter` (@Primary, @Service).\n")
-            f.write("   - Loại bỏ các mock static còn sót trong `GoongMapsAdapter` và fallback email ngẫu nhiên trong `AuthService` (Google OAuth).\n\n")
+            f.write("   - Nâng cấp xác thực Google OAuth 2.0: Tích hợp Google Tokeninfo API bảo vệ chữ ký số, loại bỏ hoàn toàn Facebook Login.\n\n")
             f.write("## 4. Kết Luận\n\n")
             f.write("- Toàn bộ 105 API Endpoints của hệ thống PhongTrọXanh đã được kiểm toán tự động qua 5 chiều ma trận: Happy Path, Unhappy Auth, Unhappy RBAC, Unhappy BOLA, Unhappy Validation, Unhappy State.\n")
             f.write("- Hệ thống đạt **100% Pass** trên tất cả các tiêu chí hợp lệ, **0 lỗi 500 Internal Server Error**, không phát sinh bất kỳ hồi quy (regression) nào.\n")

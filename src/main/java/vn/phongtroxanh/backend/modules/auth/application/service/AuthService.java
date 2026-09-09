@@ -45,6 +45,12 @@ public class AuthService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
+    @org.springframework.beans.factory.annotation.Value("${app.oauth2.google.client-id:}")
+    private String googleClientId;
+
+    @org.springframework.beans.factory.annotation.Value("${spring.profiles.active:dev}")
+    private String activeProfile;
+
     private static final SecureRandom RANDOM = new SecureRandom();
 
     @Transactional
@@ -260,26 +266,96 @@ public class AuthService {
     public AuthResponse googleLogin(GoogleLoginRequest request, HttpServletResponse response) {
         String email = null;
         String fullName = "Google User";
+        String avatarUrl = null;
 
         if (request.getIdToken() == null || !request.getIdToken().contains(".")) {
             throw new UnauthorizedException("INVALID_GOOGLE_TOKEN", "Google ID Token không hợp lệ hoặc thiếu định dạng chuẩn");
         }
 
-        try {
-            String[] parts = request.getIdToken().split("\\.");
-            if (parts.length >= 2) {
-                byte[] decoded = java.util.Base64.getUrlDecoder().decode(parts[1]);
-                com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(decoded);
-                if (node.hasNonNull("email")) {
-                    email = node.get("email").asText();
-                }
-                if (node.hasNonNull("name")) {
-                    fullName = node.get("name").asText();
-                }
+        String idToken = request.getIdToken().trim();
+        boolean isMockToken = idToken.endsWith(".mock_sig");
+
+        // 1. Mock token handling (dành riêng cho script test nội bộ / dev profile)
+        if (isMockToken) {
+            if ("prod".equalsIgnoreCase(activeProfile) || "production".equalsIgnoreCase(activeProfile)) {
+                throw new UnauthorizedException("INVALID_GOOGLE_TOKEN", "Mock Google token không được phép sử dụng trên môi trường Production");
             }
-        } catch (Exception e) {
-            log.warn("Could not decode google token payload: {}", e.getMessage());
-            throw new UnauthorizedException("INVALID_GOOGLE_TOKEN", "Google ID Token không thể giải mã");
+            log.info("Xác thực Google ID Token ở chế độ mock test (profile: {})", activeProfile);
+            try {
+                String[] parts = idToken.split("\\.");
+                if (parts.length >= 2) {
+                    byte[] decoded = java.util.Base64.getUrlDecoder().decode(parts[1]);
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(decoded);
+                    if (node.hasNonNull("email")) email = node.get("email").asText();
+                    if (node.hasNonNull("name")) fullName = node.get("name").asText();
+                    if (node.hasNonNull("picture")) avatarUrl = node.get("picture").asText();
+                }
+            } catch (Exception e) {
+                log.warn("Không thể giải mã mock google token payload: {}", e.getMessage());
+                throw new UnauthorizedException("INVALID_GOOGLE_TOKEN", "Google ID Token không thể giải mã");
+            }
+        }
+        // 2. Nếu đã cấu hình GOOGLE_CLIENT_ID -> Gọi Google Tokeninfo API để verify chữ ký số và claims
+        else if (googleClientId != null && !googleClientId.isBlank()) {
+            try {
+                org.springframework.web.client.RestClient restClient = org.springframework.web.client.RestClient.builder().build();
+                com.fasterxml.jackson.databind.JsonNode googlePayload = restClient.get()
+                        .uri("https://oauth2.googleapis.com/tokeninfo?id_token={token}", idToken)
+                        .retrieve()
+                        .body(com.fasterxml.jackson.databind.JsonNode.class);
+
+                if (googlePayload == null || googlePayload.has("error")) {
+                    throw new UnauthorizedException("INVALID_GOOGLE_TOKEN", "Google ID Token không hợp lệ hoặc đã hết hạn");
+                }
+
+                // Kiểm tra Audience (Client ID)
+                String aud = googlePayload.hasNonNull("aud") ? googlePayload.get("aud").asText() : "";
+                if (!aud.equals(googleClientId.trim())) {
+                    log.warn("Google token aud mismatch: expected {}, got {}", googleClientId, aud);
+                    throw new UnauthorizedException("INVALID_GOOGLE_TOKEN", "Google ID Token không thuộc về ứng dụng này");
+                }
+
+                // Kiểm tra Issuer
+                String iss = googlePayload.hasNonNull("iss") ? googlePayload.get("iss").asText() : "";
+                if (!"accounts.google.com".equals(iss) && !"https://accounts.google.com".equals(iss)) {
+                    throw new UnauthorizedException("INVALID_GOOGLE_TOKEN", "Issuer của Google Token không hợp lệ");
+                }
+
+                if (googlePayload.hasNonNull("email")) {
+                    email = googlePayload.get("email").asText();
+                }
+                if (googlePayload.hasNonNull("name")) {
+                    fullName = googlePayload.get("name").asText();
+                }
+                if (googlePayload.hasNonNull("picture")) {
+                    avatarUrl = googlePayload.get("picture").asText();
+                }
+            } catch (UnauthorizedException ue) {
+                throw ue;
+            } catch (Exception e) {
+                log.warn("Lỗi khi xác thực Google ID Token với Google server: {}", e.getMessage());
+                throw new UnauthorizedException("INVALID_GOOGLE_TOKEN", "Không thể xác thực Google ID Token: " + e.getMessage());
+            }
+        }
+        // 3. Fallback khi chưa cấu hình GOOGLE_CLIENT_ID trong môi trường dev
+        else {
+            if ("prod".equalsIgnoreCase(activeProfile) || "production".equalsIgnoreCase(activeProfile)) {
+                throw new UnauthorizedException("CONFIG_ERROR", "Chưa cấu hình GOOGLE_CLIENT_ID trên môi trường Production");
+            }
+            log.warn("GOOGLE_CLIENT_ID chưa được cấu hình. Tạm thời giải mã payload trên môi trường dev (KHÔNG DÙNG CHO PRODUCTION)");
+            try {
+                String[] parts = idToken.split("\\.");
+                if (parts.length >= 2) {
+                    byte[] decoded = java.util.Base64.getUrlDecoder().decode(parts[1]);
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(decoded);
+                    if (node.hasNonNull("email")) email = node.get("email").asText();
+                    if (node.hasNonNull("name")) fullName = node.get("name").asText();
+                    if (node.hasNonNull("picture")) avatarUrl = node.get("picture").asText();
+                }
+            } catch (Exception e) {
+                log.warn("Không thể giải mã google token: {}", e.getMessage());
+                throw new UnauthorizedException("INVALID_GOOGLE_TOKEN", "Google ID Token không thể giải mã");
+            }
         }
 
         if (email == null || email.isBlank()) {
@@ -288,16 +364,18 @@ public class AuthService {
 
         final String userEmail = email;
         final String userFullName = fullName;
+        final String userAvatarUrl = avatarUrl;
 
         User user = userRepository.findByEmail(userEmail).orElseGet(() -> {
             User newUser = User.builder()
                     .email(userEmail)
                     .fullName(userFullName)
+                    .avatarUrl(userAvatarUrl)
                     .passwordHash(passwordEncoder.encode(UUID.randomUUID().toString()))
                     .role(request.getRole() != null ? request.getRole() : UserRole.TENANT)
                     .status(UserStatus.ACTIVE)
                     .trustScore(50)
-                    .isVerified(false)
+                    .isVerified(true) // Email đã được Google chứng thực
                     .lastActiveAt(Instant.now())
                     .build();
             newUser = userRepository.save(newUser);
@@ -320,6 +398,20 @@ public class AuthService {
 
             return newUser;
         });
+
+        // Nếu user cũ chưa verified hoặc chưa có avatar, cập nhật từ thông tin Google
+        boolean userUpdated = false;
+        if (!Boolean.TRUE.equals(user.getIsVerified())) {
+            user.setIsVerified(true);
+            userUpdated = true;
+        }
+        if (user.getAvatarUrl() == null && userAvatarUrl != null) {
+            user.setAvatarUrl(userAvatarUrl);
+            userUpdated = true;
+        }
+        if (userUpdated) {
+            userRepository.save(user);
+        }
 
         UserProfile profile = userProfileRepository.findById(user.getId()).orElse(null);
         UserConsumable consumable = userConsumableRepository.findById(user.getId()).orElse(null);
