@@ -1,0 +1,117 @@
+# ==============================================================================
+# ENVIRONMENT & SECRETS
+# ==============================================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ==============================================================================
+# MAVEN & BUILD TARGETS
+# ==============================================================================
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# Compiled binaries & archives
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.zip
+*.tar.gz
+*.rar
+
+# ==============================================================================
+# IDE & CODE EDITORS
+# ==============================================================================
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.idea_modules/
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+.history/
+
+# Eclipse
+.settings/
+.project
+.classpath
+.metadata/
+bin/
+tmp/
+
+# NetBeans
+nbproject/private/
+build/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# ==============================================================================
+# OPERATING SYSTEM SPECIFIC FILES
+# ==============================================================================
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# ==============================================================================
+# LOGS & TEMPORARY RUNTIME FILES
+# ==============================================================================
+*.log
+logs/
+*.pid
+*.seed
+*.pid.lock
+*.tmp
+*.bak
+*.swp
+
+# Local uploads & temporary storage
+uploads/
+temp/
+
+# ==============================================================================
+# REPOMIX & AI AGENT ARTIFACTS
+# ==============================================================================
+.gemini/
+.agents/
+scratch/
+repomix-output.*
+*packed*.md

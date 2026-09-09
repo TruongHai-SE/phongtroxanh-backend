@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: phongtroxanh-backend-test
+  datasource:
+    url: jdbc:postgresql://localhost:5433/phongtroxanh_db?stringtype=unspecified
+    username: postgres
+    password: postgrespassword
+    driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+app:
+  jwt:
+    secret: 4c6f6e675f616e645f73757065725f7365637265745f6a77745f6b65795f666f725f70686f6e6774726f78616e685f766e5f68733531325f73656375726974795f746f6b656e
+    expiration-ms: 86400000
+    refresh-expiration-ms: 604800000
+  storage:
+    upload-dir: target/test-uploads
