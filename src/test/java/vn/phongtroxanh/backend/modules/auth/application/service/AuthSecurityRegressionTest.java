@@ -47,6 +47,8 @@ class AuthSecurityRegressionTest {
 
     @Test void tenantOnboardingRejectsNegativeBudget() {
         UUID id = UUID.randomUUID();
+        User user = User.builder().role(UserRole.TENANT).build(); user.setId(id);
+        when(users.findById(id)).thenReturn(Optional.of(user));
         when(profiles.findById(id)).thenReturn(Optional.of(UserProfile.builder().userId(id).build()));
         try (var security = mockStatic(vn.phongtroxanh.backend.common.security.SecurityUtils.class)) {
             security.when(vn.phongtroxanh.backend.common.security.SecurityUtils::getCurrentUserId).thenReturn(id);
@@ -58,6 +60,8 @@ class AuthSecurityRegressionTest {
 
     @Test void tenantOnboardingRejectsPartialBudgetAboveExistingMaximum() {
         UUID id = UUID.randomUUID();
+        User user = User.builder().role(UserRole.TENANT).build(); user.setId(id);
+        when(users.findById(id)).thenReturn(Optional.of(user));
         when(profiles.findById(id)).thenReturn(Optional.of(UserProfile.builder().userId(id).budgetMax(java.math.BigDecimal.valueOf(4000000)).build()));
         try (var security = mockStatic(vn.phongtroxanh.backend.common.security.SecurityUtils.class)) {
             security.when(vn.phongtroxanh.backend.common.security.SecurityUtils::getCurrentUserId).thenReturn(id);

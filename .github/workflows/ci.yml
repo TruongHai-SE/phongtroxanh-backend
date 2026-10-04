@@ -11,6 +11,31 @@ jobs:
     name: Build & Automated Tests
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: ptx_mvp_check
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -24,6 +49,27 @@ jobs:
 
       - name: Run 22 Test Suites with Maven
         run: mvn clean test -B
+        env:
+          SPRING_PROFILES_ACTIVE: test
+          PTX_TEST_DB_URL: jdbc:postgresql://localhost:5433/ptx_mvp_check?stringtype=unspecified
 
       - name: Verify Docker Container Build
         run: docker build -t phongtroxanh-backend:ci .
+
+  deploy:
+    name: Production Deployment Status
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: Production
+      url: https://phongtroxanh-backend.onrender.com
+    steps:
+      - name: Trigger Render Deploy Hook (Optional)
+        run: |
+          if [ -n "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "Triggering Render deployment via deploy hook..."
+            curl -f -sS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          else
+            echo "Deploy hook not configured. Render auto-deploys via GitHub repo sync."
+          fi

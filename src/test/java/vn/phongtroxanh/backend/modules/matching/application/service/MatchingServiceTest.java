@@ -86,7 +86,7 @@ class MatchingServiceTest {
     }
 
     @Test void preferencesRejectReversedBudgetRange() {
-        when(profiles.findById(userId)).thenReturn(Optional.of(UserProfile.builder().build()));
+        when(profiles.findById(userId)).thenReturn(Optional.of(UserProfile.builder().budgetMax(BigDecimal.valueOf(3_000_000)).build()));
         assertThatThrownBy(() -> service.updatePreferences(MatchingProfileRequest.builder()
                 .budgetMin(BigDecimal.valueOf(5_000_000)).build())).isInstanceOf(BadRequestException.class);
         verify(profiles, never()).save(any());

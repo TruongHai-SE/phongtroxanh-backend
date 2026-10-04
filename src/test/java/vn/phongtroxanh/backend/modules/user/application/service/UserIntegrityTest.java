@@ -111,7 +111,7 @@ class UserIntegrityTest {
     }
 
     @Test void userMatchingRouteValidatesEffectiveBudgetAfterPartialUpdate() {
-        when(profiles.findById(userId)).thenReturn(Optional.of(UserProfile.builder().build()));
+        when(profiles.findById(userId)).thenReturn(Optional.of(UserProfile.builder().budgetMax(BigDecimal.valueOf(4_000_000)).build()));
         // Exercise the real shared matching logic if the user route delegates to it.
         MatchingService realMatching = new MatchingService(mock(SwipeRepository.class), mock(MatchRepository.class),
                 new MatchingEngine(), users, profiles, consumables, mock(ConversationRepository.class), mock(NotificationService.class), entityManager);
