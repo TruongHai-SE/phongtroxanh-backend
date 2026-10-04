@@ -215,18 +215,32 @@ d:\EXE\backend\src\main\java\vn\phongtroxanh\backend
 
 ---
 
-## 5. Cơ Sở Dữ Liệu (Database Architecture)
+## 5. Cơ Sở Dữ Liệu & Migrations (Database Architecture)
 
-Cơ sở dữ liệu bao gồm **25 bảng quan hệ**, toàn bộ sử dụng `UUID v4` (`gen_random_uuid()`) làm khóa chính để chống lộ số lượng bản ghi kinh doanh và tương thích chuẩn phân tán.
+Cơ sở dữ liệu được quản lý tự động qua **Flyway Migrations** gồm **25 bảng quan hệ**, toàn bộ sử dụng UUID v4 (gen_random_uuid()) làm khóa chính để chống lộ số lượng bản ghi kinh doanh và tương thích chuẩn phân tán:
 
-* **Nhóm Người Dùng & Bảo Mật:** `users`, `user_matching_profiles`, `user_trust_scores`, `user_verifications`, `user_settings`.
-* **Nhóm Phòng Trọ & Không Gian:** `rooms` (chứa cột `location geometry(Point, 4326)`), `room_images`, `room_fees`, `saved_rooms`.
-* **Nhóm Ghép Đôi & Hoán Đổi:** `user_swipes`, `roommate_matches`, `room_swaps`, `swap_requests`.
-* **Nhóm Hợp Đồng & Đánh Giá:** `rental_contracts`, `rental_reviews`, `review_evidence`, `review_disputes`.
-* **Nhóm Giao Dịch & Gói Cước:** `subscription_plans`, `user_subscriptions`, `user_consumables`, `payment_transactions`.
-* **Nhóm Trò Chuyện & Tương Tác:** `chat_conversations`, `chat_messages`, `notifications`.
+* **Nhóm Người Dùng & Bảo Mật:** users, user_matching_profiles, user_trust_scores, user_verifications, user_settings.
+* **Nhóm Phòng Trọ & Không Gian:** 
+ooms (chứa cột location geometry(Point, 4326)), 
+oom_images, 
+oom_fees, saved_rooms, 
+oom_swipes.
+* **Nhóm Ghép Đôi & Hoán Đổi:** user_swipes, 
+oommate_matches, 
+oom_swaps, swap_requests.
+* **Nhóm Hợp Đồng & Đánh Giá:** 
+ental_contracts, 
+ental_reviews, 
+eview_evidence, 
+eview_disputes.
+* **Nhóm Giao Dịch & Gói Cước:** subscription_plans, user_subscriptions, user_consumables, payment_transactions, payos_order_code_seq.
+* **Nhóm Trò Chuyện & Tương Tác:** chat_conversations, chat_messages, 
+otifications.
 
-Script khởi tạo toàn bộ schema, indexes và triggers tự động cập nhật `updated_at` được lưu tại [`db/bootstrap/schema.sql`](./db/bootstrap/schema.sql).
+### Bộ Script Migration Chuẩn Hóa (src/main/resources/db/migration/)
+1. **V1__init_schema.sql**: Khởi tạo DDL bảng, PostGIS extension, kiểu ENUM và khóa ngoại toàn hệ thống.
+2. **V2__seed_system_data.sql**: Nạp dữ liệu mẫu chuẩn cho các gói đăng tin/hội viên (Free, Pro Tenant, Landlord VIP), loại phòng và tài khoản Admin mặc định (dmin@phongtroxanh.vn).
+3. **V3__postgis_spatial_and_indexes.sql**: Đánh chỉ mục không gian GiST cho truy vấn bán kính ST_DWithin, trigger tự động đồng bộ geometry và ràng buộc chống trùng lặp giao dịch thanh toán.
 
 ---
 
@@ -234,28 +248,28 @@ Script khởi tạo toàn bộ schema, indexes và triggers tự động cập n
 
 ### Yêu Cầu Tiên Quyết
 * **Java:** OpenJDK 21 LTS trở lên.
-* **Build Tool:** Apache Maven 3.9+ (hoặc dùng wrapper `mvnw.cmd` / `mvnw` đi kèm).
+* **Build Tool:** Apache Maven 3.9+ (hoặc dùng wrapper mvnw.cmd / mvnw đi kèm).
 * **Docker & Docker Compose:** Để khởi động PostgreSQL (PostGIS) và Redis cục bộ.
 
 ### Bước 1: Khởi động CSDL và Redis qua Docker
 Từ thư mục gốc của backend, khởi chạy hai container:
-```bash
+`ash
 docker compose up -d
-```
+`
 Kiểm tra trạng thái container:
-```bash
+`ash
 docker compose ps
-```
-* Container `phongtroxanh-postgres` chạy tại cổng `5433` (đã tự động nạp PostGIS và chạy schema `db/bootstrap/schema.sql`).
-* Container `phongtroxanh-redis` chạy tại cổng `6379`.
+`
+* Container phongtroxanh-postgres chạy tại cổng 5433 (đã nạp sẵn PostGIS extension). Flyway sẽ tự động migrate các file V1-V3 khi ứng dụng Spring Boot khởi động.
+* Container phongtroxanh-redis chạy tại cổng 6379.
 
 ### Bước 2: Thiết lập biến môi trường (.env)
-Tạo file `.env` từ file mẫu:
-```bash
+Tạo file .env từ file mẫu:
+`ash
 cp .env.example .env
-```
+`
 Cấu hình các thông số tối thiểu:
-```properties
+`properties
 SPRING_PROFILES_ACTIVE=dev
 SERVER_PORT=8080
 DB_HOST=localhost
@@ -270,10 +284,10 @@ REDIS_PORT=6379
 # JWT HS512 secret (ít nhất 64 ký tự)
 JWT_SECRET=4c6f6e675f616e645f73757065725f7365637265745f6a77745f6b65795f666f725f70686f6e6774726f78616e685f766e5f68733531325f73656375726974795f746f6b656e
 
-# Cổng thanh toán payOS
-PAYOS_CLIENT_ID=
-PAYOS_API_KEY=
-PAYOS_CHECKSUM_KEY=
+# Cổng thanh toán payOS (VietQR ngân hàng tự động)
+PAYOS_CLIENT_ID=your_client_id
+PAYOS_API_KEY=your_api_key
+PAYOS_CHECKSUM_KEY=your_checksum_key
 
 # Email (chọn 'console' để in ra log khi test local hoặc 'brevo' kèm BREVO_API_KEY)
 MAIL_PROVIDER=console
@@ -285,11 +299,11 @@ CLOUDINARY_API_SECRET=your_api_secret
 
 # Goong Maps API
 GOONG_API_KEY=your_goong_api_key
-```
+`
 
-### Bước 3: Biên dịch & Kiểm thử đơn vị
-Biên dịch 199 source files và chạy kiểm thử tự động:
-```bash
+### Bước 3: Biên dịch & Chạy bộ kiểm thử tự động
+Biên dịch mã nguồn và chạy toàn bộ 22 bộ kiểm thử tự động:
+`ash
 # Windows
 .\mvnw.cmd clean compile
 .\mvnw.cmd test
@@ -297,57 +311,62 @@ Biên dịch 199 source files và chạy kiểm thử tự động:
 # Linux / macOS
 ./mvnw clean compile
 ./mvnw test
-```
+`
 
 ### Bước 4: Khởi chạy Backend Server
-```bash
+`ash
 # Windows
 .\mvnw.cmd spring-boot:run
 
 # Linux / macOS
 ./mvnw spring-boot:run
-```
-Ứng dụng sẽ lắng nghe tại: `http://localhost:8080`
+`
+Ứng dụng sẽ lắng nghe tại: http://localhost:8080
 
 ### Bước 5: Truy cập Tài Liệu API & Health Check
-* **Swagger UI (OpenAPI 3):** `http://localhost:8080/swagger-ui.html`
-* **OpenAPI Specification (JSON):** `http://localhost:8080/v3/api-docs`
-* **Spring Actuator Health:** `http://localhost:8080/actuator/health`
+* **Swagger UI (OpenAPI 3):** http://localhost:8080/swagger-ui.html
+* **OpenAPI Specification (JSON):** http://localhost:8080/v3/api-docs
+* **Spring Actuator Health:** http://localhost:8080/actuator/health
 
 ---
 
-## 7. Kiểm thử
+## 7. Kiểm Thử & Đảm Bảo Chất Lượng (Quality Assurance)
 
-Dùng JDK 21 và PostgreSQL/Redis đã chạy. Các integration test dùng database riêng `ptx_mvp_check`, đã khởi tạo schema và migration.
+Hệ thống được bảo vệ bởi **22 bộ kiểm thử tự động toàn diện** đặt tại src/test/java/vn/phongtroxanh/backend/:
 
-```powershell
-$env:JAVA_HOME='C:\Program Files\Java\jdk-21'
-$env:PTX_TEST_DB_URL='jdbc:postgresql://localhost:5433/ptx_mvp_check?stringtype=unspecified'
+* **Cổng Thanh Toán & PayOS Integration:**
+  - PayOsSignatureTest: Kiểm tra thuật toán băm HMAC SHA-256 xác thực chữ ký webhook.
+  - PayOsFlowIntegrationTest: Luồng tạo link thanh toán VietQR, tính lũy kế idempotency và cập nhật trạng thái đơn hàng.
+  - PaymentServiceTest: Kiểm thử bảng giá gói hội viên và kiểm toán lịch sử giao dịch.
+* **Xử Lý Đồng Thời & Race Conditions:**
+  - ConcurrentMatchingDatabaseTest: Mô phỏng nhiều người dùng cùng quẹt ghép đôi một thời điểm.
+  - DailySwipeQuotaDatabaseTest: Kiểm tra câu lệnh atomic SQL trừ quota, đảm bảo không âm số lượt quẹt.
+  - AuthRaceIntegrationTest: Chống đăng ký trùng lặp tài khoản khi có request song song.
+* **Bảo Mật & Phân Quyền:**
+  - AuthSecurityRegressionTest: Kiểm tra luồng cấp lại AccessToken và từ chối token giả mạo.
+  - ChatSecurityRegressionTest: Phân quyền channel WebSocket STOMP, cô lập dữ liệu chat giữa các cặp người dùng.
+  - AccessSecurityRegressionTest: Kiểm soát quyền truy cập theo vai trò (ROLE_TENANT, ROLE_LANDLORD, ROLE_ADMIN).
+* **Nghiệp Vụ Cốt Lõi & Hàng Đợi KYC:**
+  - AdminIntegrityTest: Kiểm tra tính toán số liệu thống kê Dashboard và phân trang hàng đợi duyệt CCCD.
+  - RoomServiceTest & RoomRequestValidationTest: Kiểm tra tìm kiếm không gian PostGIS và thuật toán pHash chống trùng ảnh phòng.
+  - RentalServiceTest & RoomSwapServiceTest: Vòng đời hợp đồng thuê, sinh mã QR check-in dùng 1 lần và phê duyệt đổi phòng.
+  - ReviewIntegrityTest: Tính điểm tín nhiệm 2 chiều và quy trình xử lý khiếu nại đánh giá.
+
+Chạy toàn bộ test suites:
+`powershell
 mvn clean test
-```
-
-Luồng HTTP/WebSocket dùng [`scripts/check_core_flows.py`](scripts/check_core_flows.py), chạy trên backend test tại localhost:18080:
-
-```powershell
-python scripts/check_core_flows.py --fixture-db ptx_mvp_check
-```
-
-Script dùng Python chuẩn và Node.js 24 để chạy `check_chat_websocket.cjs`, kiểm tra status/body/thay đổi dữ liệu và exit khác 0 khi lỗi. Backend test phải dùng khóa payOS rỗng để kiểm tra trường hợp thiếu cấu hình. Script chỉ cho chạy fixture trên DB test, không dùng database nghiệp vụ.
-
-Kết quả đã kiểm chứng: **108 test + 73 kiểm tra HTTP/WebSocket**. Xem [báo cáo MVP](docs/backend-verification.md) và [thiết lập payOS](docs/payos-setup.md).
+`
 
 ---
 
 ## 8. Tài Liệu Kỹ Thuật Bổ Trợ (Documentation Index)
 
-Tài liệu thiết kế được lưu trữ trong thư mục [`docs/`](./docs/):
+Tài liệu thiết kế được lưu trữ trong thư mục [docs/](./docs/):
 
-* [`system-specification.md`](./docs/system-specification.md): Đặc tả chi tiết 105 API endpoints và quy tắc nghiệp vụ.
-* [`coding-rules.md`](./docs/coding-rules.md): 26 chương quy chuẩn kiến trúc, quy tắc phân lớp, chuẩn đặt tên và Definition of Done.
-* [`architecture-decisions.md`](./docs/architecture-decisions.md): 11 bản ghi quyết định kiến trúc (ADR-001 đến ADR-011).
-* [`schema.sql`](./db/bootstrap/schema.sql): DDL khởi tạo toàn bộ 25 bảng CSDL, types, indexes và triggers.
-* [`third-party-integrations.md`](./docs/third-party-integrations.md): Hướng dẫn chi tiết đăng ký credentials cho Cloudinary, Brevo, Goong Maps, Google OAuth và payOS.
-* [`backend-verification.md`](docs/backend-verification.md): Verified flows, test evidence and MVP limitations.
-* [`codebase-overview.md`](./docs/codebase-overview.md): Tài liệu phân tích kiến trúc hệ thống dành cho kỹ sư phần mềm.
-
-Cấu trúc SQL và quy trình cập nhật database: [db/README.md](db/README.md). SQL thực thi được lưu riêng với tài liệu.
+* [system-specification.md](./docs/system-specification.md): Đặc tả chi tiết 105 API endpoints và quy tắc nghiệp vụ.
+* [coding-rules.md](./docs/coding-rules.md): 26 chương quy chuẩn kiến trúc, quy tắc phân lớp, chuẩn đặt tên và Definition of Done.
+* [rchitecture-decisions.md](./docs/architecture-decisions.md): 11 bản ghi quyết định kiến trúc (ADR-001 đến ADR-011).
+* [payos-setup.md](./docs/payos-setup.md): Hướng dẫn kết nối cổng thanh toán PayOS VietQR và xử lý webhook.
+* [	hird-party-integrations.md](./docs/third-party-integrations.md): Hướng dẫn chi tiết đăng ký credentials cho Cloudinary, Brevo, Goong Maps, Google OAuth và payOS.
+* [ackend-verification.md](docs/backend-verification.md): Báo cáo bằng chứng kiểm thử các luồng chức năng thực tế.
+* [codebase-overview.md](./docs/codebase-overview.md): Tài liệu phân tích kiến trúc hệ thống chuyên sâu cho lập trình viên.
