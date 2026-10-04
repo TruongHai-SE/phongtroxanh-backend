@@ -64,11 +64,14 @@ class PayOsFlowIntegrationTest {
                 .currency("VND").paymentLinkId(payment.getPaymentLinkId()).code("00").desc("success").build();
         return Map.of("data",data);
     }
+    private Map<String,Object> event(CreatePaymentResponse payment) {
+        return event(payment, payment.getAmount().longValue());
+    }
     @Test void checkoutRetryAndWebhookReplayGrantOneSubscription() {
         var first=checkout("retry"); var second=checkout("retry");
         assertEquals(first.getTransactionCode(),second.getTransactionCode());
         verify(gateway,times(1)).create(anyLong(),anyLong(),anyString(),anyString(),any());
-        service.processPayOsWebhook(event(first,49000)); service.processPayOsWebhook(event(first,49000));
+        service.processPayOsWebhook(event(first)); service.processPayOsWebhook(event(first));
         assertEquals("SUCCESS",service.getPaymentResult(first.getTransactionCode()).getStatus().name());
         assertEquals(50,jdbc.queryForObject("SELECT swipes_left FROM user_consumables WHERE user_id=?",Integer.class,userId));
         assertEquals(2,jdbc.queryForObject("SELECT boosts_left FROM user_consumables WHERE user_id=?",Integer.class,userId));
@@ -80,8 +83,8 @@ class PayOsFlowIntegrationTest {
         var barrier=new CyclicBarrier(2);
         when(gateway.verify(anyMap())).thenAnswer(i -> { barrier.await(5,TimeUnit.SECONDS); return ((Map<?,?>)i.getArgument(0)).get("data"); });
         try(var pool=Executors.newFixedThreadPool(2)) {
-            var a=pool.submit(()->service.processPayOsWebhook(event(first,49000)));
-            var b=pool.submit(()->service.processPayOsWebhook(event(second,49000)));
+            var a=pool.submit(()->service.processPayOsWebhook(event(first)));
+            var b=pool.submit(()->service.processPayOsWebhook(event(second)));
             a.get(10,TimeUnit.SECONDS); b.get(10,TimeUnit.SECONDS);
         }
         assertEquals(50,jdbc.queryForObject("SELECT free_swipes_left FROM user_consumables WHERE user_id=?",Integer.class,userId));
@@ -100,7 +103,7 @@ class PayOsFlowIntegrationTest {
         var payment=checkout("expired");
         jdbc.update("UPDATE payment_transactions SET qr_expired_at=NOW()-INTERVAL '1 second' WHERE gateway_order_id=?",payment.getTransactionCode());
         assertThrows(ConflictException.class,()->checkout("expired"));
-        service.processPayOsWebhook(event(payment,49000));
+        service.processPayOsWebhook(event(payment));
         assertEquals("SUCCESS",service.getPaymentResult(payment.getTransactionCode()).getStatus().name());
     }
 }
