@@ -2,12 +2,14 @@ package vn.phongtroxanh.backend.modules.user.domain;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.DynamicUpdate;
 import vn.phongtroxanh.backend.common.entity.BaseEntity;
 
 import java.time.Instant;
 
 @Entity
 @Table(name = "users")
+@DynamicUpdate
 @Getter
 @Setter
 @Builder

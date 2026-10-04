@@ -14,5 +14,7 @@ public class AuthResponse {
     @Builder.Default
     private String tokenType = "Bearer";
     private long expiresIn;
+    private Boolean isNewUser;
+    private Boolean isOnboarded;
     private UserProfileResponse user;
 }
