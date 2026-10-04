@@ -231,8 +231,10 @@ public class PaymentService {
         jdbc.update("INSERT INTO user_consumables(user_id) VALUES (?) ON CONFLICT DO NOTHING",userId);
         jdbc.queryForObject("SELECT user_id FROM user_consumables WHERE user_id=? FOR UPDATE",UUID.class,userId);
         userConsumableRepository.resetDailySwipesAtomic(userId,LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh")));
-        int oldQuota = jdbc.queryForObject("SELECT COALESCE(MAX((p.features->>'swipes_per_day')::integer),15) FROM subscriptions s JOIN package_plans p ON p.id=s.plan_id WHERE s.user_id=? AND s.is_active AND s.start_date<=NOW() AND s.end_date>NOW()",Integer.class,userId);
-        int increase = Math.max(0,payment.getBenefits().getOrDefault("swipes_per_day",15)-Math.max(15,oldQuota));
+        int oldQuota = jdbc.queryForObject("SELECT COALESCE(MAX((p.features->>'swipes_per_day')::integer),15) FROM subscriptions s JOIN package_plans p ON p.id=s.plan_id WHERE s.user_id=? AND s.is_active AND s.start_date<=clock_timestamp() AND s.end_date>clock_timestamp()",Integer.class,userId);
+        int targetSwipes = payment.getBenefits().getOrDefault("swipes_per_day", 15);
+        int currentFree = jdbc.queryForObject("SELECT free_swipes_left FROM user_consumables WHERE user_id=?", Integer.class, userId);
+        int increase = Math.max(0, targetSwipes - Math.max(oldQuota, currentFree));
         jdbc.update("UPDATE user_consumables SET swipes_left=swipes_left+?, free_swipes_left=free_swipes_left+?, boosts_left=boosts_left+?, version=version+1 WHERE user_id=?",
                 increase,increase,payment.getBenefits().getOrDefault("boosts",0),userId);
         jdbc.update("INSERT INTO subscriptions(user_id,plan_id,billing_cycle,start_date,end_date) VALUES (?,?,'MONTHLY',NOW(),GREATEST(NOW(),COALESCE((SELECT MAX(end_date) FROM subscriptions WHERE user_id=? AND plan_id=? AND is_active),NOW())) + INTERVAL '30 days')",
