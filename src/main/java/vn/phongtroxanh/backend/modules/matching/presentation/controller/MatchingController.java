@@ -32,7 +32,7 @@ public class MatchingController {
     }
 
     @PostMapping("/swipe")
-    @Operation(summary = "API #41: Hành động quẹt (LIKE / DISLIKE / SUPER_LIKE)", description = "Thực hiện quẹt hồ sơ (trừ 1 lượt quẹt atomic SQL). Tự động phát hiện Match 2 chiều và tạo phòng chat")
+    @Operation(summary = "API #41: Hành động quẹt (LIKE / DISLIKE)", description = "Thực hiện quẹt hồ sơ (trừ 1 lượt quẹt atomic SQL). Tự động phát hiện Match 2 chiều và tạo phòng chat")
     public ResponseEntity<ApiResponse<SwipeResponse>> swipe(@Valid @RequestBody SwipeRequest request) {
         SwipeResponse response = matchingService.swipe(request);
         String msg = response.isMatch() ? "Chúc mừng! Bạn và đối phương đã tương thích ghép đôi thành công!" : "Ghi nhận hành động quẹt thành công";

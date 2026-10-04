@@ -60,7 +60,7 @@ public class RoomSwapController {
         return ResponseEntity.ok(ApiResponse.ok("Lấy chi tiết bài đăng thành công", response));
     }
 
-    @PostMapping({"/{id}/request", "/posts/{id}/apply"})
+    @PostMapping({"/{id}/request", "/posts/{id}/apply", "/{id}/proposals"})
     @PreAuthorize("hasRole('TENANT')")
     @Operation(summary = "API #51 / #49: Gửi đề xuất / đăng ký nhận hoán đổi phòng", description = "Ứng viên gửi đề xuất hoán đổi phòng hoặc nhận pass phòng kèm tin nhắn")
     public ResponseEntity<ApiResponse<SwapProposalResponse>> sendSwapProposal(
