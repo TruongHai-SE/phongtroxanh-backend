@@ -211,23 +211,21 @@ d:\EXE\backend\src\main\java\vn\phongtroxanh\backend
 | **Monetization** | `/api/v1/monetization` | **7** | Tiered plan catalogue, payOS checkout URL generation, signed webhook handling, Transaction logs. |
 | **Admin Control** | `/api/v1/admin` | **12** | Executive KPI dashboard, KYC CCCD decryption audit, User moderation, Room verification, Dispute resolution. |
 | **Location Services** | `/api/v1/locations` | **3** | Vietnamese address autocomplete (24h Redis cache), Forward & Reverse Geocoding. |
-| **Public Statistics** | `/api/v1/misc` | **1** | Public landing page metrics (active rooms, successful matches, satisfaction index). |
-| **Total** | | **105 REST + 1 WS** | **100% compliant** with RFC 9457 Problem Details and `ApiResponse<T>` envelope. |
+| **Public Statistics** | `/api/v1/misc` | **1** | Public landing page metrics (ac## 5. Database Architecture & Migrations
 
----
-
-## 5. Database Architecture
-
-The persistence model consists of **25 relational tables**, all utilizing `UUID v4` (`gen_random_uuid()`) primary keys to prevent enumeration attacks and support distributed scalability:
+The persistence layer is managed via **Flyway Migrations** and consists of **25 relational tables**, all utilizing `UUID v4` (`gen_random_uuid()`) primary keys to prevent enumeration attacks and support distributed scalability:
 
 * **Identity & Security:** `users`, `user_matching_profiles`, `user_trust_scores`, `user_verifications`, `user_settings`.
-* **Real Estate & Spatial:** `rooms` (includes `location geometry(Point, 4326)`), `room_images`, `room_fees`, `saved_rooms`.
+* **Real Estate & Spatial:** `rooms` (includes `location geometry(Point, 4326)`), `room_images`, `room_fees`, `saved_rooms`, `room_swipes`.
 * **Social & Matching:** `user_swipes`, `roommate_matches`, `room_swaps`, `swap_requests`.
 * **Contracts & Quality:** `rental_contracts`, `rental_reviews`, `review_evidence`, `review_disputes`.
-* **Billing & Monetization:** `subscription_plans`, `user_subscriptions`, `user_consumables`, `payment_transactions`.
+* **Billing & Monetization:** `subscription_plans`, `user_subscriptions`, `user_consumables`, `payment_transactions`, `payos_order_code_seq`.
 * **Communication:** `chat_conversations`, `chat_messages`, `notifications`.
 
-The initial schema, GiST/B-tree indexes, and automated timestamp triggers are maintained in [`db/bootstrap/schema.sql`](./db/bootstrap/schema.sql).
+### Consolidated Migration Scripts (`src/main/resources/db/migration/`)
+1. **`V1__init_schema.sql`**: Complete database schema DDL, PostGIS spatial extension, custom PostgreSQL ENUMs, and foreign key relationships.
+2. **`V2__seed_system_data.sql`**: Enterprise seed data for subscription packages (Free, Pro, VIP, Landlord packages with real-market pricing), room categories, and the initial system administrator account (`admin@phongtroxanh.vn`).
+3. **`V3__postgis_spatial_and_indexes.sql`**: High-throughput spatial GiST indexes for geolocation radius queries (`ST_DWithin`), auto-updating geometry triggers, and payment transaction uniqueness constraints.
 
 ---
 
@@ -247,7 +245,7 @@ Verify container health:
 ```bash
 docker compose ps
 ```
-* Container `phongtroxanh-postgres` runs on port `5433` (pre-configured with PostGIS extension and initialized schema).
+* Container `phongtroxanh-postgres` runs on port `5433` (pre-configured with PostGIS extension). Flyway automatically migrates V1-V3 schema on application boot.
 * Container `phongtroxanh-redis` runs on port `6379`.
 
 ### Step 2: Configure Environment Variables (.env)
@@ -271,10 +269,10 @@ REDIS_PORT=6379
 # JWT HS512 Secret (Minimum 64 characters)
 JWT_SECRET=4c6f6e675f616e645f73757065725f7365637265745f6a77745f6b65795f666f725f70686f6e6774726f78616e685f766e5f68733531325f73656375726974795f746f6b656e
 
-# payOS Gateway
-PAYOS_CLIENT_ID=
-PAYOS_API_KEY=
-PAYOS_CHECKSUM_KEY=
+# payOS Gateway (VietQR Banking)
+PAYOS_CLIENT_ID=your_client_id
+PAYOS_API_KEY=your_api_key
+PAYOS_CHECKSUM_KEY=your_checksum_key
 
 # Email (Select 'console' for local testing or 'brevo' with BREVO_API_KEY)
 MAIL_PROVIDER=console
@@ -288,8 +286,8 @@ CLOUDINARY_API_SECRET=your_api_secret
 GOONG_API_KEY=your_goong_api_key
 ```
 
-### Step 3: Build & Run Unit Tests
-Compile 199 source files and execute automated tests:
+### Step 3: Build & Run Automated Test Suites
+Execute full compilation and automated unit/integration test suites:
 ```bash
 # Windows
 .\mvnw.cmd clean compile
@@ -317,25 +315,32 @@ The application server listens at: `http://localhost:8080`
 
 ---
 
-## 7. Testing
+## 7. Testing & Quality Assurance
 
-Use JDK 21 with PostgreSQL and Redis running. SQL integration tests require an isolated `ptx_mvp_check` database initialized with the schema and migration.
+The backend includes **22 comprehensive automated test suites** located in `src/test/java/vn/phongtroxanh/backend/`:
 
+* **Payment & PayOS Integration:**
+  - `PayOsSignatureTest`: Validates HMAC SHA-256 signature calculations and webhook payload integrity.
+  - `PayOsFlowIntegrationTest`: End-to-end checkout URL generation, webhook idempotency, and status updates.
+  - `PaymentServiceTest`: Unit validation for subscription plans and transaction auditing.
+* **Concurrency & Race Conditions:**
+  - `ConcurrentMatchingDatabaseTest`: Multi-threaded roommate swipe simulations and mutual match detection.
+  - `DailySwipeQuotaDatabaseTest`: Atomic SQL counter verification preventing negative quota balances.
+  - `AuthRaceIntegrationTest`: Prevents race conditions during simultaneous user registration.
+* **Security & Access Control:**
+  - `AuthSecurityRegressionTest`: Token rotation, invalid token rejection, and brute-force mitigation.
+  - `ChatSecurityRegressionTest`: Channel-level STOMP WebSocket authorization and cross-tenant isolation.
+  - `AccessSecurityRegressionTest`: Role-based authorization (`ROLE_TENANT`, `ROLE_LANDLORD`, `ROLE_ADMIN`).
+* **Core Domains & KYC Auditing:**
+  - `AdminIntegrityTest`: Platform analytics aggregation and paged KYC verification queue.
+  - `RoomServiceTest` & `RoomRequestValidationTest`: PostGIS spatial bounds, pricing validation, and image duplicate detection.
+  - `RentalServiceTest` & `RoomSwapServiceTest`: Lifecycle transitions, QR check-in token generation, and lease transfer arbitration.
+  - `ReviewIntegrityTest`: Two-way rating calculation and dispute mediation workflows.
+
+Execute all suites with fresh database fixtures:
 ```powershell
-$env:JAVA_HOME='C:\Program Files\Java\jdk-21'
-$env:PTX_TEST_DB_URL='jdbc:postgresql://localhost:5433/ptx_mvp_check?stringtype=unspecified'
 mvn clean test
 ```
-
-[`scripts/check_core_flows.py`](scripts/check_core_flows.py) checks HTTP/WebSocket flows against the test backend at localhost:18080:
-
-```powershell
-python scripts/check_core_flows.py --fixture-db ptx_mvp_check
-```
-
-The script uses Python's standard library and Node.js 24 for `check_chat_websocket.cjs`. It checks statuses, payloads and resulting state, and exits nonzero on failure. Run the test backend with empty payOS credentials to check the missing-configuration case. Fixture execution is restricted to the isolated test database.
-
-Verified results: **108 tests + 73 HTTP/WebSocket checks**. See the [MVP verification report](docs/backend-verification.md) and [payOS setup](docs/payos-setup.md).
 
 ---
 
@@ -346,9 +351,7 @@ Engineering specifications reside in [`docs/`](./docs/):
 * [`system-specification.md`](./docs/system-specification.md): Comprehensive functional requirements and endpoint catalog.
 * [`coding-rules.md`](./docs/coding-rules.md): 26 chapters covering architecture rules, naming standards, and Definition of Done.
 * [`architecture-decisions.md`](./docs/architecture-decisions.md): 11 Architecture Decision Records (ADR-001 through ADR-011).
-* [`schema.sql`](./db/bootstrap/schema.sql): DDL creating all 25 relational tables, PostGIS extensions, indexes, and triggers.
-* [`third-party-integrations.md`](./docs/third-party-integrations.md): Setup guide for Cloudinary, Brevo, Goong Maps, and payOS.
-* [`backend-verification.md`](docs/backend-verification.md): Verified flows, test evidence and MVP limitations.
-* [`codebase-overview.md`](./docs/codebase-overview.md): In-depth system architecture guide for incoming engineers.
-
-Database layout and upgrade procedure: [db/README.md](db/README.md). Executable SQL is stored separately from documentation.
+* [`payos-setup.md`](./docs/payos-setup.md): Complete integration guide for PayOS VietQR payments and webhook handling.
+* [`third-party-integrations.md`](./docs/third-party-integrations.md): Configuration guide for Cloudinary, Brevo, Goong Maps, and payOS.
+* [`backend-verification.md`](docs/backend-verification.md): Verified flows, test evidence, and system validation reports.
+* [codebase-overview.md](./docs/codebase-overview.md): In-depth system architecture guide for incoming engineers.
