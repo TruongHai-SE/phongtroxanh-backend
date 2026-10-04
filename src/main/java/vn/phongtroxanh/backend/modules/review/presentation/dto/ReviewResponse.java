@@ -35,5 +35,6 @@ public class ReviewResponse {
     private String replyComment;
     private Instant repliedAt;
     private List<String> evidenceImages;
+    private Boolean isVerifiedStay;
     private Instant createdAt;
 }

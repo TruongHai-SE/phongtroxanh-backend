@@ -91,4 +91,15 @@ public class ReviewController {
 
         return ResponseEntity.ok(ApiResponse.ok("Lấy danh sách khiếu nại thành công", reviewService.getPendingDisputes(page, limit)));
     }
+
+    @PostMapping("/disputes/{disputeId}/resolve")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "API #68: Admin giải quyết khiếu nại đánh giá", description = "Admin chấp thuận (gỡ đánh giá vi phạm và hoàn điểm uy tín) hoặc bác bỏ khiếu nại")
+    public ResponseEntity<ApiResponse<ReviewResponse>> resolveDispute(
+            @PathVariable("disputeId") UUID disputeId,
+            @Valid @RequestBody ResolveDisputeRequest request) {
+
+        ReviewResponse response = reviewService.resolveDispute(disputeId, request);
+        return ResponseEntity.ok(ApiResponse.ok("Giải quyết khiếu nại thành công", response));
+    }
 }
