@@ -32,6 +32,10 @@ public class JwtTokenProvider {
     }
 
     public String generateAccessToken(UUID userId, String role, String email) {
+        return generateAccessToken(userId, role, email, 0);
+    }
+
+    public String generateAccessToken(UUID userId, String role, String email, long credentialVersion) {
         Instant now = Instant.now();
         Instant expiry = now.plusMillis(accessExpirationMs);
 
@@ -40,6 +44,7 @@ public class JwtTokenProvider {
                 .claim("role", role)
                 .claim("email", email)
                 .claim("type", "ACCESS")
+                .claim("credentialVersion", credentialVersion)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiry))
                 .signWith(secretKey)
@@ -47,6 +52,10 @@ public class JwtTokenProvider {
     }
 
     public String generateRefreshToken(UUID userId, String sessionId) {
+        return generateRefreshToken(userId, sessionId, 0);
+    }
+
+    public String generateRefreshToken(UUID userId, String sessionId, long credentialVersion) {
         Instant now = Instant.now();
         Instant expiry = now.plusMillis(refreshExpirationMs);
 
@@ -54,6 +63,7 @@ public class JwtTokenProvider {
                 .subject(userId.toString())
                 .claim("sessionId", sessionId)
                 .claim("type", "REFRESH")
+                .claim("credentialVersion", credentialVersion)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiry))
                 .signWith(secretKey)
@@ -66,6 +76,7 @@ public class JwtTokenProvider {
 
         return Jwts.builder()
                 .subject(identifier)
+                .id(UUID.randomUUID().toString())
                 .claim("purpose", purpose)
                 .claim("type", "TEMP")
                 .issuedAt(Date.from(now))

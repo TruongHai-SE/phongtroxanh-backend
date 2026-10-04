@@ -14,7 +14,6 @@ public class SwipeActionConverter implements AttributeConverter<SwipeAction, Str
         return switch (attribute) {
             case LIKE -> "RIGHT";
             case DISLIKE -> "LEFT";
-            case SUPER_LIKE -> "SUPER";
         };
     }
 
@@ -24,9 +23,8 @@ public class SwipeActionConverter implements AttributeConverter<SwipeAction, Str
             return null;
         }
         return switch (dbData) {
-            case "RIGHT" -> SwipeAction.LIKE;
+            case "RIGHT", "SUPER" -> SwipeAction.LIKE;
             case "LEFT" -> SwipeAction.DISLIKE;
-            case "SUPER" -> SwipeAction.SUPER_LIKE;
             default -> throw new IllegalArgumentException("Unknown swipe_dir_enum value: " + dbData);
         };
     }

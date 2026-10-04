@@ -2,13 +2,18 @@ package vn.phongtroxanh.backend.modules.user.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import vn.phongtroxanh.backend.common.exception.ResourceNotFoundException;
+import vn.phongtroxanh.backend.common.exception.ConflictException;
+import vn.phongtroxanh.backend.common.exception.UnauthorizedException;
 import vn.phongtroxanh.backend.common.security.SecurityUtils;
 import vn.phongtroxanh.backend.common.storage.FileStoragePort;
 import vn.phongtroxanh.backend.modules.rental.domain.Rental;
+import vn.phongtroxanh.backend.modules.matching.application.service.MatchingService;
 import vn.phongtroxanh.backend.modules.rental.domain.RentalStatus;
 import vn.phongtroxanh.backend.modules.rental.infrastructure.repository.RentalRepository;
 import vn.phongtroxanh.backend.modules.review.domain.Review;
@@ -18,9 +23,12 @@ import vn.phongtroxanh.backend.modules.user.infrastructure.repository.*;
 import vn.phongtroxanh.backend.modules.user.presentation.dto.*;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 @Slf4j
 @Service
@@ -35,9 +43,13 @@ public class UserService {
     private final ReviewRepository reviewRepository;
     private final RentalRepository rentalRepository;
     private final FileStoragePort fileStoragePort;
+    private final MatchingService matchingService;
+    private final EntityManager entityManager;
 
+    @Transactional
     public UserProfileResponse getMe() {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
+        userConsumableRepository.resetDailySwipesAtomic(currentUserId, LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh")));
         User user = userRepository.findById(currentUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("USER_NOT_FOUND", "Không tìm thấy thông tin người dùng"));
 
@@ -52,6 +64,8 @@ public class UserService {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
         User user = userRepository.findById(currentUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("USER_NOT_FOUND", "Không tìm thấy thông tin người dùng"));
+        entityManager.refresh(user, LockModeType.PESSIMISTIC_WRITE);
+        userConsumableRepository.resetDailySwipesAtomic(currentUserId, LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh")));
 
         user.setFullName(request.getFullName());
         user.setUpdatedAt(Instant.now());
@@ -112,49 +126,7 @@ public class UserService {
 
     @Transactional
     public MatchingProfileResponse updateMatchingProfile(MatchingProfileRequest request) {
-        UUID currentUserId = SecurityUtils.getCurrentUserId();
-        UserProfile profile = userProfileRepository.findById(currentUserId)
-                .orElseGet(() -> UserProfile.builder().userId(currentUserId).build());
-
-        if (request.getBudgetMin() != null) profile.setBudgetMin(request.getBudgetMin());
-        if (request.getBudgetMax() != null) profile.setBudgetMax(request.getBudgetMax());
-        if (request.getPreferredDistricts() != null) profile.setPreferredDistricts(request.getPreferredDistricts());
-        if (request.getPreferredGender() != null) profile.setPreferredGender(request.getPreferredGender());
-        if (request.getPreferredRoomType() != null) profile.setPreferredRoomType(request.getPreferredRoomType());
-
-        if (request.getEarlySleeper() != null) profile.setEarlySleeper(request.getEarlySleeper());
-        if (request.getIsNeat() != null) profile.setIsNeat(request.getIsNeat());
-        if (request.getAllowGuests() != null) profile.setAllowGuests(request.getAllowGuests());
-        if (request.getNonSmoking() != null) profile.setNonSmoking(request.getNonSmoking());
-        if (request.getNoiseTolerance() != null) profile.setNoiseTolerance(request.getNoiseTolerance());
-
-        if (request.getProximitySchool() != null) profile.setProximitySchool(request.getProximitySchool());
-        if (request.getProximityWork() != null) profile.setProximityWork(request.getProximityWork());
-        if (request.getProximityMarket() != null) profile.setProximityMarket(request.getProximityMarket());
-        if (request.getProximityBus() != null) profile.setProximityBus(request.getProximityBus());
-
-        if (request.getInterests() != null) profile.setInterests(request.getInterests());
-
-        userProfileRepository.save(profile);
-
-        return MatchingProfileResponse.builder()
-                .userId(currentUserId)
-                .budgetMin(profile.getBudgetMin())
-                .budgetMax(profile.getBudgetMax())
-                .preferredDistricts(profile.getPreferredDistricts())
-                .preferredGender(profile.getPreferredGender())
-                .preferredRoomType(profile.getPreferredRoomType())
-                .earlySleeper(profile.getEarlySleeper())
-                .isNeat(profile.getIsNeat())
-                .allowGuests(profile.getAllowGuests())
-                .nonSmoking(profile.getNonSmoking())
-                .noiseTolerance(profile.getNoiseTolerance())
-                .proximitySchool(profile.getProximitySchool())
-                .proximityWork(profile.getProximityWork())
-                .proximityMarket(profile.getProximityMarket())
-                .proximityBus(profile.getProximityBus())
-                .interests(profile.getInterests())
-                .build();
+        return matchingService.updatePreferences(request);
     }
 
     public TrustScoreResponse getTrustScore() {
@@ -185,7 +157,8 @@ public class UserService {
         int kycScore = Boolean.TRUE.equals(user.getIsVerified()) ? 30 : 0;
 
         // 2. Điểm đánh giá Review: Truy vấn thực tế từ reviewRepository (Tối đa 30 điểm)
-        List<Review> reviews = reviewRepository.findByRevieweeIdOrderByCreatedAtDesc(currentUserId);
+        List<Review> reviews = reviewRepository.findByRevieweeIdOrderByCreatedAtDesc(currentUserId).stream()
+                .filter(r -> "ACTIVE".equals(r.getStatus())).toList();
         int reviewScore = 0;
         if (!reviews.isEmpty()) {
             double avgRating = reviews.stream().mapToInt(Review::getRating).average().orElse(0.0);
@@ -195,17 +168,23 @@ public class UserService {
         // 3. Điểm lịch sử thuê phòng: Truy vấn thực tế hợp đồng đã CHECKED_IN hoặc TERMINATED (Tối đa 20 điểm)
         List<Rental> tenantRentals = rentalRepository.findByTenantIdOrderByCreatedAtDesc(currentUserId);
         List<Rental> landlordRentals = rentalRepository.findByLandlordIdOrderByCreatedAtDesc(currentUserId);
-        long validRentalsCount = tenantRentals.stream().filter(r -> r.getStatus() == RentalStatus.CHECKED_IN || r.getStatus() == RentalStatus.TERMINATED).count()
-                + landlordRentals.stream().filter(r -> r.getStatus() == RentalStatus.CHECKED_IN || r.getStatus() == RentalStatus.TERMINATED).count();
+        long validRentalsCount = Stream.concat(tenantRentals.stream(), landlordRentals.stream())
+                .filter(r -> r.getStatus() == RentalStatus.CHECKED_IN
+                        || (r.getStatus() == RentalStatus.TERMINATED && r.getCheckedInAt() != null)).count();
         int rentalDurationScore = (int) Math.min(20, validRentalsCount * 10);
 
-        // 4. Điểm hoàn thiện hồ sơ & tần suất hoạt động (Tối đa 20 điểm)
+        // 4. Điểm hoàn thiện hồ sơ & tần suất hoạt động (Tối đa 20 điểm) — tiêu chí theo vai trò
         UserProfile profile = userProfileRepository.findById(currentUserId).orElse(null);
         int responseRateScore = 0;
         if (profile != null) {
-            if (profile.getSchoolOrCompany() != null && !profile.getSchoolOrCompany().isBlank()) responseRateScore += 5;
             if (profile.getBio() != null && !profile.getBio().isBlank()) responseRateScore += 5;
-            if (profile.getBudgetMin() != null && profile.getBudgetMax() != null) responseRateScore += 5;
+            if (user.getRole() == UserRole.LANDLORD) {
+                if (profile.getAddress() != null && !profile.getAddress().isBlank()) responseRateScore += 5;
+                if (profile.getPreferredDistricts() != null && !profile.getPreferredDistricts().isEmpty()) responseRateScore += 5;
+            } else {
+                if (profile.getSchoolOrCompany() != null && !profile.getSchoolOrCompany().isBlank()) responseRateScore += 5;
+                if (profile.getBudgetMin() != null && profile.getBudgetMax() != null) responseRateScore += 5;
+            }
         }
         if (user.getLastActiveAt() != null) {
             responseRateScore += 5;
@@ -227,6 +206,14 @@ public class UserService {
     @Transactional
     public KycStatusResponse submitKyc(KycSubmitRequest request) {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
+        User user = entityManager.find(User.class, currentUserId, LockModeType.PESSIMISTIC_WRITE);
+        if (user == null) {
+            throw new ResourceNotFoundException("USER_NOT_FOUND", "Không tìm thấy người dùng");
+        }
+        if (Boolean.TRUE.equals(user.getIsVerified()) || userVerificationRepository.existsByUserIdAndStatusIn(
+                currentUserId, List.of(VerificationStatus.PENDING, VerificationStatus.APPROVED))) {
+            throw new ConflictException("KYC_ALREADY_SUBMITTED", "Bạn đã có hồ sơ đang chờ duyệt hoặc đã được xác minh");
+        }
 
         UserVerification verification = UserVerification.builder()
                 .userId(currentUserId)
@@ -263,6 +250,10 @@ public class UserService {
                 .orElseThrow(() -> new ResourceNotFoundException("USER_NOT_FOUND", "Không tìm thấy người dùng"));
 
         UserProfile profile = userProfileRepository.findById(userId).orElse(null);
+        if ((user.getStatus() == UserStatus.LOCKED || user.getStatus() == UserStatus.DELETED
+                || profile == null || !Boolean.TRUE.equals(profile.getIsPublic())) && !canInspectProfile(userId)) {
+            throw new ResourceNotFoundException("USER_NOT_FOUND", "Không tìm thấy hồ sơ công khai");
+        }
 
         PublicUserProfileResponse.PublicUserProfileResponseBuilder builder = PublicUserProfileResponse.builder()
                 .id(user.getId())
@@ -339,11 +330,26 @@ public class UserService {
         User user = userRepository.findById(currentUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("USER_NOT_FOUND", "Không tìm thấy người dùng"));
 
+        if (Stream.concat(rentalRepository.findByTenantIdOrderByCreatedAtDesc(currentUserId).stream(),
+                rentalRepository.findByLandlordIdOrderByCreatedAtDesc(currentUserId).stream())
+                .anyMatch(r -> r.getStatus() == RentalStatus.PENDING_CHECKIN || r.getStatus() == RentalStatus.CHECKED_IN)) {
+            throw new ConflictException("ACTIVE_RENTAL_EXISTS", "Vui lòng kết thúc hoặc hủy hợp đồng đang còn hiệu lực trước khi xóa tài khoản");
+        }
+
         user.setStatus(UserStatus.DELETED);
         user.setUpdatedAt(Instant.now());
         userRepository.save(user);
 
         log.info("Soft deleted account for user {}", currentUserId);
+    }
+
+    private boolean canInspectProfile(UUID ownerId) {
+        if (SecurityUtils.hasRole("ADMIN")) return true;
+        try {
+            return SecurityUtils.getCurrentUserId().equals(ownerId);
+        } catch (UnauthorizedException ignored) {
+            return false;
+        }
     }
 
     private UserProfileResponse mapToProfileResponse(User user, UserProfile profile, UserConsumable consumable) {
@@ -362,12 +368,12 @@ public class UserService {
 
         if (consumable != null) {
             builder.swipesLeft(consumable.getSwipesLeft())
-                    .boostsLeft(consumable.getBoostsLeft())
-                    .superMatchesLeft(consumable.getSuperMatchesLeft());
+                    .boostsLeft(consumable.getBoostsLeft());
         }
 
         if (profile != null) {
-            builder.schoolOrCompany(profile.getSchoolOrCompany())
+            builder.address(profile.getAddress())
+                    .schoolOrCompany(profile.getSchoolOrCompany())
                     .birthDate(profile.getBirthDate())
                     .gender(profile.getGender())
                     .preferredGender(profile.getPreferredGender())

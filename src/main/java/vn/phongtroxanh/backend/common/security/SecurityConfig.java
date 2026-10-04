@@ -83,6 +83,8 @@ public class SecurityConfig {
                         })
                 )
                 .authorizeHttpRequests(auth -> auth
+                        // Onboarding requires authentication
+                        .requestMatchers("/api/v1/auth/onboarding/**").authenticated()
                         // Public endpoints
                         .requestMatchers("/api/v1/auth/**").permitAll()
                         .requestMatchers("/api/v1/misc/**").permitAll()
@@ -92,9 +94,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/rooms/{id}").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/reviews/rooms/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/monetization/plans").permitAll()
-                        .requestMatchers("/api/v1/monetization/vnpay-ipn", "/api/v1/monetization/vnpay-return").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/monetization/payos-webhook").permitAll()
                         .requestMatchers("/api/v1/locations/**").permitAll()
-                        .requestMatchers("/api/v1/payments/webhooks/**").permitAll()
                         // OpenAPI / Swagger UI
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         // Actuator

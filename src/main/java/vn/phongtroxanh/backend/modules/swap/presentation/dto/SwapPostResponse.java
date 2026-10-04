@@ -38,5 +38,11 @@ public class SwapPostResponse {
     private UUID landlordId;
     private SwapStatus landlordDecision;
     private SwapStatus status;
+    private String currentRoomTitle;
+    private BigDecimal currentRoomPrice;
+    private String currentRoomDistrict;
+    private BigDecimal currentRoomArea;
+    private List<String> currentRoomImages;
+    private String authorSchool;
     private Instant createdAt;
 }

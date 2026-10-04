@@ -1,8 +1,6 @@
 package vn.phongtroxanh.backend.modules.auth.presentation.dto;
 
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.*;
 import lombok.*;
 import vn.phongtroxanh.backend.modules.user.domain.UserRole;
 
@@ -13,9 +11,12 @@ import vn.phongtroxanh.backend.modules.user.domain.UserRole;
 @AllArgsConstructor
 public class RegisterRequest {
 
-    @Email(message = "Email không đúng định dạng")
+    @NotBlank(message = "Email không được để trống")
+    @Email(message = "Email không đúng định dạng (ví dụ: vidu@gmail.com)")
     private String email;
 
+    @NotBlank(message = "Số điện thoại không được để trống")
+    @Pattern(regexp = "^(0[3|5|7|8|9])[0-9]{8}$", message = "Số điện thoại không đúng định dạng VN (10 chữ số, đầu 03/05/07/08/09)")
     private String phoneNumber;
 
     @NotBlank(message = "Mật khẩu không được để trống")
@@ -23,7 +24,8 @@ public class RegisterRequest {
     private String password;
 
     @NotBlank(message = "Họ và tên không được để trống")
-    @Size(max = 150, message = "Họ và tên không được quá 150 ký tự")
+    @Size(min = 2, max = 150, message = "Họ và tên phải từ 2 đến 150 ký tự")
+    @Pattern(regexp = "^[\\p{L}]+(?:[\\s'-][\\p{L}]+)*$", message = "Họ và tên chỉ được chứa chữ cái và khoảng trắng hợp lệ")
     private String fullName;
 
     @Builder.Default

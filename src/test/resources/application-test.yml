@@ -1,8 +1,10 @@
 spring:
+  config:
+    import: optional:file:target/nonexistent-test.env[.properties]
   application:
     name: phongtroxanh-backend-test
   datasource:
-    url: jdbc:postgresql://localhost:5433/phongtroxanh_db?stringtype=unspecified
+    url: ${PTX_TEST_DB_URL:jdbc:postgresql://localhost:5433/ptx_mvp_check?stringtype=unspecified}
     username: postgres
     password: postgrespassword
     driver-class-name: org.postgresql.Driver

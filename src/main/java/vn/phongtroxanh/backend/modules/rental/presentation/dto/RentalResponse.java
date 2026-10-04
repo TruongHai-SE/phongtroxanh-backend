@@ -24,6 +24,8 @@ public class RentalResponse {
     private String tenantName;
     private String tenantPhone;
     private String tenantAvatar;
+    private Integer tenantTrustScore;
+    private Boolean tenantVerified;
 
     private UUID landlordId;
     private String landlordName;

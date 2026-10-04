@@ -18,4 +18,6 @@ public class CreatePaymentResponse {
     private PaymentMethod paymentMethod;
     private BigDecimal amount;
     private String paymentUrl;
+    private String qrCode;
+    private String paymentLinkId;
 }

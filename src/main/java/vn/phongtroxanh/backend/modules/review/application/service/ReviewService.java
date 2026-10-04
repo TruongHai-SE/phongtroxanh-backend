@@ -1,6 +1,5 @@
 package vn.phongtroxanh.backend.modules.review.application.service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -33,9 +32,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Autowired;
+
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ReviewService {
 
     private final ReviewRepository reviewRepository;
@@ -45,16 +45,46 @@ public class ReviewService {
     private final TrustScoreLogRepository trustScoreLogRepository;
     private final FileStoragePort fileStoragePort;
 
+    @Autowired
+    public ReviewService(ReviewRepository reviewRepository,
+                         ReviewDisputeRepository reviewDisputeRepository,
+                         RentalRepository rentalRepository,
+                         UserRepository userRepository,
+                         TrustScoreLogRepository trustScoreLogRepository,
+                         FileStoragePort fileStoragePort) {
+        this.reviewRepository = reviewRepository;
+        this.reviewDisputeRepository = reviewDisputeRepository;
+        this.rentalRepository = rentalRepository;
+        this.userRepository = userRepository;
+        this.trustScoreLogRepository = trustScoreLogRepository;
+        this.fileStoragePort = fileStoragePort;
+    }
+
     @Transactional
     public ReviewResponse createReview(CreateReviewRequest request) {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
+        Rental rental = null;
 
-        Rental rental = rentalRepository.findById(request.getRentalId())
-                .orElseThrow(() -> new ResourceNotFoundException("RENTAL_NOT_FOUND", "Hợp đồng thuê không tồn tại"));
-
-        if (rental.getStatus() != RentalStatus.CHECKED_IN && rental.getStatus() != RentalStatus.TERMINATED) {
-            throw new BadRequestException("INVALID_RENTAL_STATUS", "Chỉ có thể đánh giá sau khi đã hoàn tất Check-in phòng trọ");
+        if (request.getRentalId() != null) {
+            rental = rentalRepository.findById(request.getRentalId())
+                    .orElseThrow(() -> new ResourceNotFoundException("RENTAL_NOT_FOUND", "Hợp đồng thuê không tồn tại"));
+        } else if (request.getRoomId() != null) {
+            rental = rentalRepository.findFirstByTenantIdAndRoomIdOrderByCreatedAtDesc(currentUserId, request.getRoomId())
+                    .orElseThrow(() -> new ForbiddenException("RENTAL_REQUIRED", "Bạn cần có hợp đồng thuê phòng này trên hệ thống mới có thể viết đánh giá"));
         }
+
+        if (rental == null) {
+            throw new BadRequestException("MISSING_TARGET", "Vui lòng cung cấp rentalId hoặc roomId để đánh giá");
+        }
+
+        // Bắt buộc người thuê phải đã nhận phòng thực tế (đã Check-in thành công hoặc hợp đồng kết thúc đã ở)
+        boolean hasCheckedIn = rental.getCheckedInAt() != null || rental.getStatus() == RentalStatus.CHECKED_IN;
+        boolean wasCheckedInStay = rental.getStatus() == RentalStatus.TERMINATED && rental.getCheckedInAt() != null;
+        if (!hasCheckedIn && !wasCheckedInStay) {
+            throw new BadRequestException("CHECKIN_REQUIRED", "Bạn cần hoàn tất nhận phòng thực tế (Check-in) trước khi gửi đánh giá để đảm bảo tính khách quan");
+        }
+
+        boolean isVerifiedStay = true;
 
         if (!rental.getTenantId().equals(currentUserId) && !rental.getLandlordId().equals(currentUserId)) {
             throw new ForbiddenException("BOLA_FORBIDDEN", "Bạn không thuộc hợp đồng thuê này để đánh giá");
@@ -79,7 +109,7 @@ public class ReviewService {
                 .comment(request.getComment())
                 .tags(request.getTags())
                 .images(request.getImages())
-                .isVerifiedStay(true)
+                .isVerifiedStay(isVerifiedStay)
                 .status("ACTIVE")
                 .build();
 
@@ -217,6 +247,40 @@ public class ReviewService {
         });
     }
 
+    @Transactional
+    public ReviewResponse resolveDispute(UUID disputeId, ResolveDisputeRequest request) {
+        ReviewDispute dispute = reviewDisputeRepository.findById(disputeId)
+                .orElseThrow(() -> new ResourceNotFoundException("DISPUTE_NOT_FOUND", "Khiếu nại không tồn tại"));
+
+        Review review = reviewRepository.findById(dispute.getReviewId())
+                .orElseThrow(() -> new ResourceNotFoundException("REVIEW_NOT_FOUND", "Đánh giá không tồn tại"));
+
+        UUID adminId = SecurityUtils.getCurrentUserId();
+        dispute.setAdminNotes(request.getAdminNotes());
+        dispute.setResolvedBy(adminId);
+        dispute.setResolvedAt(Instant.now());
+
+        if (Boolean.TRUE.equals(request.getApproved())) {
+            // Admin chấp thuận khiếu nại: Gỡ đánh giá khỏi hiển thị và hoàn điểm uy tín
+            review.setStatus("REMOVED");
+            dispute.setStatus("RESOLVED_UPHELD");
+
+            if (review.getRating() <= 2) {
+                adjustTrustScore(review.getRevieweeId(), 10, "Được Admin chấp thuận khiếu nại (gỡ review oan)");
+            }
+        } else {
+            // Admin bác bỏ khiếu nại: Giữ nguyên đánh giá
+            review.setStatus("ACTIVE");
+            dispute.setStatus("RESOLVED_DISMISSED");
+        }
+
+        reviewDisputeRepository.save(dispute);
+        review = reviewRepository.save(review);
+
+        log.info("Admin {} resolved dispute {} for review {}: approved={}", adminId, disputeId, review.getId(), request.getApproved());
+        return mapToResponse(review);
+    }
+
     private void adjustTrustScore(UUID userId, int delta, String reason) {
         userRepository.findById(userId).ifPresent(user -> {
             int newScore = Math.max(0, Math.min(100, user.getTrustScore() + delta));
@@ -257,6 +321,7 @@ public class ReviewService {
                 .disputeStatus(disputeStatus)
                 .replyComment(review.getLandlordReply())
                 .repliedAt(review.getRepliedAt())
+                .isVerifiedStay(review.getIsVerifiedStay() != null ? review.getIsVerifiedStay() : true)
                 .createdAt(review.getCreatedAt())
                 .build();
     }

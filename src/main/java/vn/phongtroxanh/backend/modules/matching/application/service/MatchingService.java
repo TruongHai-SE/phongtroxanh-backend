@@ -1,5 +1,7 @@
 package vn.phongtroxanh.backend.modules.matching.application.service;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -16,6 +18,8 @@ import vn.phongtroxanh.backend.modules.matching.domain.*;
 import vn.phongtroxanh.backend.modules.matching.infrastructure.repository.MatchRepository;
 import vn.phongtroxanh.backend.modules.matching.infrastructure.repository.SwipeRepository;
 import vn.phongtroxanh.backend.modules.matching.presentation.dto.*;
+import vn.phongtroxanh.backend.modules.notification.application.service.NotificationService;
+import vn.phongtroxanh.backend.modules.notification.domain.NotificationType;
 import vn.phongtroxanh.backend.modules.user.domain.*;
 import vn.phongtroxanh.backend.modules.user.infrastructure.repository.*;
 import vn.phongtroxanh.backend.modules.user.presentation.dto.MatchingProfileRequest;
@@ -23,6 +27,9 @@ import vn.phongtroxanh.backend.modules.user.presentation.dto.MatchingProfileResp
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 @Slf4j
@@ -37,6 +44,8 @@ public class MatchingService {
     private final UserProfileRepository userProfileRepository;
     private final UserConsumableRepository userConsumableRepository;
     private final ConversationRepository conversationRepository;
+    private final NotificationService notificationService;
+    private final EntityManager entityManager;
 
     public List<RoommateCardDTO> getDiscoveryFeed() {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
@@ -53,7 +62,7 @@ public class MatchingService {
             if (excludedIds.contains(u.getId())) continue;
 
             UserProfile theirProfile = userProfileRepository.findById(u.getId()).orElse(null);
-            if (theirProfile == null || Boolean.FALSE.equals(theirProfile.getIsPublic())) continue;
+            if (theirProfile == null || !Boolean.TRUE.equals(theirProfile.getIsPublic())) continue;
 
             var compatibility = matchingEngine.calculateCompatibility(myProfile, theirProfile);
 
@@ -80,8 +89,11 @@ public class MatchingService {
                     .build());
         }
 
-        // Sort by compatibility score descending
-        feed.sort((a, b) -> Integer.compare(b.getCompatibilityScore(), a.getCompatibilityScore()));
+        Set<UUID> boostedIds = new HashSet<>();
+        userConsumableRepository.findByProfileBoostExpiresAtAfter(Instant.now())
+                .forEach(c -> boostedIds.add(c.getUserId()));
+        feed.sort(Comparator.<RoommateCardDTO, Boolean>comparing(c -> boostedIds.contains(c.getUserId())).reversed()
+                .thenComparing(RoommateCardDTO::getCompatibilityScore, Comparator.reverseOrder()));
 
         return feed;
     }
@@ -98,7 +110,18 @@ public class MatchingService {
         User targetUser = userRepository.findById(targetId)
                 .orElseThrow(() -> new ResourceNotFoundException("USER_NOT_FOUND", "Người dùng không tồn tại"));
 
-        if (targetUser.getStatus() != UserStatus.ACTIVE) {
+        // Serialize opposite swipes before either transaction spends credits or checks the reverse swipe.
+        for (UUID id : List.of(currentUserId, targetId).stream().sorted().toList()) {
+            if (id.equals(targetId)) {
+                entityManager.refresh(targetUser, LockModeType.PESSIMISTIC_WRITE);
+            } else {
+                entityManager.find(User.class, id, LockModeType.PESSIMISTIC_WRITE);
+            }
+        }
+
+        UserProfile targetProfile = userProfileRepository.findById(targetId).orElse(null);
+        if (targetUser.getStatus() != UserStatus.ACTIVE || targetUser.getRole() != UserRole.TENANT
+                || targetProfile == null || !Boolean.TRUE.equals(targetProfile.getIsPublic())) {
             throw new BadRequestException("USER_INACTIVE", "Người dùng này hiện không còn hoạt động");
         }
 
@@ -107,16 +130,10 @@ public class MatchingService {
         }
 
         // Deduct 1 swipe atomically
+        userConsumableRepository.resetDailySwipesAtomic(currentUserId, LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh")));
         int updated = userConsumableRepository.decrementSwipeAtomic(currentUserId);
         if (updated == 0) {
-            throw new BadRequestException("OUT_OF_SWIPES", "Bạn đã hết lượt vuốt hôm nay (15 lượt/ngày). Vui lòng quay lại ngày mai hoặc nâng cấp gói");
-        }
-
-        if (request.getAction() == SwipeAction.SUPER_LIKE) {
-            int superUpdated = userConsumableRepository.decrementSuperMatchAtomic(currentUserId);
-            if (superUpdated == 0) {
-                throw new BadRequestException("OUT_OF_SUPER_MATCHES", "Bạn đã hết lượt Siêu Tương Thích");
-            }
+            throw new BadRequestException("OUT_OF_SWIPES", "Bạn đã hết lượt vuốt hôm nay. Vui lòng quay lại ngày mai hoặc mua thêm lượt");
         }
 
         Swipe swipe = Swipe.builder()
@@ -130,9 +147,9 @@ public class MatchingService {
         int swipesLeft = consumable != null ? consumable.getSwipesLeft() : 0;
 
         // Check mutual match
-        if (request.getAction() == SwipeAction.LIKE || request.getAction() == SwipeAction.SUPER_LIKE) {
+        if (request.getAction() == SwipeAction.LIKE) {
             Optional<Swipe> reverseSwipe = swipeRepository.findReverseSwipe(
-                    currentUserId, targetId, List.of(SwipeAction.LIKE, SwipeAction.SUPER_LIKE));
+                    currentUserId, targetId, List.of(SwipeAction.LIKE));
 
             if (reverseSwipe.isPresent()) {
                 // Calculate match score
@@ -156,6 +173,13 @@ public class MatchingService {
                                 .type(ConversationType.ROOMMATE)
                                 .lastMessageAt(Instant.now())
                                 .build()));
+
+                notificationService.create(currentUserId, "Tương thích mới", "Bạn có một tương thích mới. Hãy trò chuyện để làm quen",
+                        NotificationType.MATCH, Map.of("matchId", match.getId().toString(),
+                                "conversationId", conversation.getId().toString(), "partnerId", targetId.toString()));
+                notificationService.create(targetId, "Tương thích mới", "Bạn có một tương thích mới. Hãy trò chuyện để làm quen",
+                        NotificationType.MATCH, Map.of("matchId", match.getId().toString(),
+                                "conversationId", conversation.getId().toString(), "partnerId", currentUserId.toString()));
 
                 log.info("MUTUAL MATCH CREATED between {} and {}, score: {}", currentUserId, targetId, score);
 
@@ -233,15 +257,25 @@ public class MatchingService {
         if (updated == 0) {
             throw new BadRequestException("OUT_OF_BOOSTS", "Bạn đã hết lượt đẩy hồ sơ");
         }
+        UserConsumable consumable = userConsumableRepository.findById(currentUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("BALANCE_NOT_FOUND", "Không tìm thấy số dư"));
+        consumable.setProfileBoostExpiresAt(Instant.now().plus(24, ChronoUnit.HOURS));
+        userConsumableRepository.save(consumable);
         log.info("Boosted profile for user {}", currentUserId);
     }
 
     public CompatibilityDetailResponse getCompatibility(UUID targetUserId) {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
+        User targetUser = userRepository.findById(targetUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("USER_NOT_FOUND", "Không tìm thấy người dùng"));
         UserProfile myProfile = userProfileRepository.findById(currentUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("PROFILE_NOT_FOUND", "Chưa có hồ sơ"));
         UserProfile theirProfile = userProfileRepository.findById(targetUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("PROFILE_NOT_FOUND", "Người dùng chưa có hồ sơ"));
+        if (targetUser.getStatus() != UserStatus.ACTIVE || targetUser.getRole() != UserRole.TENANT
+                || !Boolean.TRUE.equals(theirProfile.getIsPublic())) {
+            throw new ResourceNotFoundException("PROFILE_NOT_FOUND", "Không tìm thấy hồ sơ công khai");
+        }
 
         var result = matchingEngine.calculateCompatibility(myProfile, theirProfile);
 
@@ -293,6 +327,13 @@ public class MatchingService {
         if (request.getProximityMarket() != null) profile.setProximityMarket(request.getProximityMarket());
         if (request.getProximityBus() != null) profile.setProximityBus(request.getProximityBus());
         if (request.getInterests() != null) profile.setInterests(request.getInterests());
+
+        if ((profile.getBudgetMin() != null && profile.getBudgetMin().signum() < 0)
+                || (profile.getBudgetMax() != null && profile.getBudgetMax().signum() < 0)
+                || (profile.getBudgetMin() != null && profile.getBudgetMax() != null
+                && profile.getBudgetMin().compareTo(profile.getBudgetMax()) > 0)) {
+            throw new BadRequestException("INVALID_BUDGET_RANGE", "Ngân sách phải không âm và mức tối thiểu không được lớn hơn mức tối đa");
+        }
 
         userProfileRepository.save(profile);
 

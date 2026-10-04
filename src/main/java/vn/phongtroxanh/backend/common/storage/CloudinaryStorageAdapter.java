@@ -8,6 +8,8 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import vn.phongtroxanh.backend.common.exception.BadRequestException;
+import vn.phongtroxanh.backend.common.exception.AppException;
+import org.springframework.http.HttpStatus;
 
 import java.util.Map;
 
@@ -53,18 +55,15 @@ public class CloudinaryStorageAdapter implements FileStoragePort {
         String targetFolder = "phongtroxanh/" + subFolder;
 
         if (this.cloudName.isBlank()) {
-            String simulatedUrl = "https://res.cloudinary.com/phongtroxanh/image/upload/v1/"
-                    + targetFolder + "/" + java.util.UUID.randomUUID() + ".jpg";
-            log.info("Cloudinary cloudName not configured, generated simulated URL: {}", simulatedUrl);
-            return simulatedUrl;
+            throw new AppException(HttpStatus.SERVICE_UNAVAILABLE, "STORAGE_NOT_CONFIGURED", "Chưa cấu hình Cloudinary để lưu ảnh");
         }
 
-        try (java.io.InputStream inputStream = file.getInputStream()) {
+        try {
             Map<?, ?> uploadResult = cloudinary.uploader().upload(
-                    inputStream,
+                    file.getBytes(),
                     ObjectUtils.asMap(
                             "folder", targetFolder,
-                            "resource_type", "auto"
+                            "resource_type", "image"
                     )
             );
 

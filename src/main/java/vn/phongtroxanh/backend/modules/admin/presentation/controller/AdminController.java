@@ -17,7 +17,6 @@ import vn.phongtroxanh.backend.modules.room.domain.RoomStatus;
 import vn.phongtroxanh.backend.modules.user.domain.UserRole;
 import vn.phongtroxanh.backend.modules.user.domain.UserStatus;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -36,9 +35,14 @@ public class AdminController {
     }
 
     @GetMapping({"/kyc/pending", "/kyc/queue"})
-    @Operation(summary = "API #79 / #81: Danh sách hồ sơ CCCD chờ duyệt", description = "Lấy danh sách các hồ sơ định danh CCCD đã nộp chờ kiểm duyệt")
-    public ResponseEntity<ApiResponse<List<KycAuditItemDTO>>> getPendingKyc() {
-        return ResponseEntity.ok(ApiResponse.ok("Lấy danh sách hồ sơ CCCD chờ duyệt thành công", adminService.getPendingKycList()));
+    @Operation(summary = "API #79 / #81: Danh sách hồ sơ CCCD chờ duyệt (hỗ trợ phân trang và tìm kiếm)", description = "Lấy danh sách các hồ sơ định danh CCCD đã nộp chờ kiểm duyệt kèm tìm kiếm theo tên, email, sđt và lọc vai trò")
+    public ResponseEntity<ApiResponse<Page<KycAuditItemDTO>>> getPendingKyc(
+            @RequestParam(value = "search", required = false) String search,
+            @RequestParam(value = "role", required = false) UserRole role,
+            @RequestParam(value = "page", required = false, defaultValue = "0") int page,
+            @RequestParam(value = "limit", required = false, defaultValue = "10") int limit) {
+
+        return ResponseEntity.ok(ApiResponse.ok("Lấy danh sách hồ sơ CCCD chờ duyệt thành công", adminService.getPendingKycPage(search, role, page, limit)));
     }
 
     @PutMapping("/kyc/{id}/approve")
@@ -77,6 +81,33 @@ public class AdminController {
 
         adminService.updateUserStatus(id, request);
         return ResponseEntity.ok(ApiResponse.ok("Cập nhật trạng thái người dùng thành công", null));
+    }
+
+    @PutMapping("/users/{id}/verify")
+    @Operation(summary = "Admin: Cấp hoặc gỡ xác minh tài khoản", description = "Cấp tích xanh xác minh thủ công hoặc thu hồi cho người dùng")
+    public ResponseEntity<ApiResponse<Void>> verifyUser(
+            @PathVariable("id") UUID id,
+            @RequestParam(value = "verified", defaultValue = "true") boolean verified) {
+
+        adminService.verifyUser(id, verified);
+        return ResponseEntity.ok(ApiResponse.ok(verified ? "Cấp xác minh người dùng thành công" : "Thu hồi xác minh thành công", null));
+    }
+
+    @PostMapping("/users/{id}/reset-password")
+    @Operation(summary = "Admin: Đặt lại mật khẩu tạm thời cho người dùng", description = "Tạo mật khẩu tạm thời, mã hóa lưu DB, gửi trực tiếp qua email người dùng và thông báo in-app (không hiển thị mật khẩu cho admin)")
+    public ResponseEntity<ApiResponse<java.util.Map<String, String>>> resetUserPassword(@PathVariable("id") UUID id) {
+        String maskedEmail = adminService.adminResetPassword(id);
+        return ResponseEntity.ok(ApiResponse.ok("Mật khẩu mới đã được tạo và gửi an toàn đến email của người dùng", java.util.Map.of("maskedEmail", maskedEmail)));
+    }
+
+    @PostMapping("/users/{id}/notify")
+    @Operation(summary = "Admin: Gửi thông báo/email cho người dùng", description = "Gửi thông báo hệ thống và email trực tiếp từ ban quản trị đến tài khoản người dùng")
+    public ResponseEntity<ApiResponse<Void>> notifyUser(
+            @PathVariable("id") UUID id,
+            @Valid @RequestBody AdminNotifyUserRequest request) {
+
+        adminService.sendUserNotification(id, request.getTitle(), request.getMessage());
+        return ResponseEntity.ok(ApiResponse.ok("Gửi thông báo đến người dùng thành công", null));
     }
 
     @GetMapping("/rooms")

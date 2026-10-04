@@ -9,10 +9,12 @@ import vn.phongtroxanh.backend.modules.user.domain.VerificationStatus;
 
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Collection;
 
 @Repository
 public interface UserVerificationRepository extends JpaRepository<UserVerification, UUID> {
     Optional<UserVerification> findTopByUserIdOrderByCreatedAtDesc(UUID userId);
+    boolean existsByUserIdAndStatusIn(UUID userId, Collection<VerificationStatus> statuses);
     Page<UserVerification> findByStatusOrderByCreatedAtAsc(VerificationStatus status, Pageable pageable);
     Page<UserVerification> findByStatus(VerificationStatus status, Pageable pageable);
 }

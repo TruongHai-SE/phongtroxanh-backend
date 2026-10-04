@@ -4,7 +4,9 @@
 
 # PhongTrọXanh.vn — Backend Service
 
-> Hệ thống Backend kiến trúc **Modular Monolith** phục vụ nền tảng tìm kiếm phòng trọ sinh thái và ghép đôi bạn cùng phòng tương thích (Smart Roommate Matching), tích hợp chấm điểm tín nhiệm 2 chiều (Two-Way TrustScore) và hợp đồng thuê điện tử kèm Check-in QR chống gian lận.
+> Backend **Modular Monolith** phục vụ tìm phòng trọ, ghép đôi bạn cùng phòng, chấm điểm tín nhiệm và quản lý hồ sơ thuê kèm check-in QR. Hiện chưa có sinh PDF hợp đồng hoặc nhà cung cấp ký điện tử.
+
+Kết quả MVP: [luồng đã kiểm thử và giới hạn](docs/backend-verification.md). Cấu hình thanh toán: [payOS](docs/payos-setup.md). Hướng dẫn VNPay cũ được thay bằng tài liệu payOS này.
 
 ---
 
@@ -19,8 +21,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL_16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL 16"></a>
-  <a href="https://postgis.net/"><img src="https://img.shields.io/badge/PostGIS_3.4-2D8C4E?style=for-the-badge&logo=postgis&logoColor=white" alt="PostGIS"></a>
+  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL_18-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL 18"></a>
+  <a href="https://postgis.net/"><img src="https://img.shields.io/badge/PostGIS_3.6-2D8C4E?style=for-the-badge&logo=postgis&logoColor=white" alt="PostGIS"></a>
   <a href="https://redis.io/"><img src="https://img.shields.io/badge/Redis_7-DC382D?style=for-the-badge&logo=redis&logoColor=white" alt="Redis 7"></a>
   <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/Docker_Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker Compose"></a>
   <a href="https://springdoc.org/"><img src="https://img.shields.io/badge/OpenAPI_3.0-85EA2D?style=for-the-badge&logo=openapiinitiative&logoColor=black" alt="OpenAPI"></a>
@@ -28,7 +30,7 @@
 
 <p align="center">
   <a href="https://cloudinary.com/"><img src="https://img.shields.io/badge/Cloudinary-3448C5?style=for-the-badge&logo=cloudinary&logoColor=white" alt="Cloudinary"></a>
-  <a href="https://vnpay.vn/"><img src="https://img.shields.io/badge/VNPay_Sandbox-005BAA?style=for-the-badge&logo=vnpay&logoColor=white" alt="VNPay Sandbox"></a>
+  <a href="https://payos.vn/"><img src="https://img.shields.io/badge/payOS-005BAA?style=for-the-badge&logo=payos&logoColor=white" alt="payOS"></a>
   <a href="https://www.brevo.com/"><img src="https://img.shields.io/badge/Brevo_REST_API-0B996E?style=for-the-badge&logo=brevo&logoColor=white" alt="Brevo"></a>
   <a href="https://goong.io/"><img src="https://img.shields.io/badge/Goong_Maps_API-FF5722?style=for-the-badge" alt="Goong Maps"></a>
   <a href="https://resilience4j.readme.io/"><img src="https://img.shields.io/badge/Resilience4j_2.2-FF9900?style=for-the-badge" alt="Resilience4j"></a>
@@ -42,12 +44,12 @@
 | :--- | :--- | :--- |
 | **Kiến trúc ứng dụng** | **Modular Monolith** (12 modules biệt lập) | Đóng gói nghiệp vụ theo ranh giới miền (Bounded Contexts) nhưng chạy trong một runtime duy nhất; loại bỏ chi phí vận hành mạng và distributed transactions của Microservices ở quy mô hiện tại. |
 | **Mô hình phân tầng** | **Pragmatic Layered Architecture** | 4 tầng: `presentation` $\to$ `application` $\to$ `domain` $\to$ `infrastructure`. Cho phép Entity sử dụng trực tiếp JPA annotations để tận dụng Hibernate Dirty Checking, giảm tối đa boilerplate chuyển đổi POJO. |
-| **Cơ sở dữ liệu** | PostgreSQL 16 (Alpine) + Extension PostGIS 3.4 | CSDL quan hệ chính lưu 25 bảng thực thể. Cột `location` kiểu `GEOMETRY(Point, 4326)` được đánh chỉ mục không gian `GIST` để tính bán kính `ST_DWithin` phục vụ MapView. |
+| **Cơ sở dữ liệu** | PostgreSQL 18 (Alpine) + Extension PostGIS 3.4 | CSDL quan hệ chính lưu 25 bảng thực thể. Cột `location` kiểu `GEOMETRY(Point, 4326)` được đánh chỉ mục không gian `GIST` để tính bán kính `ST_DWithin` phục vụ MapView. |
 | **Bộ nhớ đệm & Broker** | Redis 7 (Alpine) | Đóng 4 vai trò: (1) In-Memory Cache (view count, matching profile), (2) Token Blacklist khi Logout, (3) Atomic Counters (trừ lượt quẹt/đẩy tin), (4) Message Broker cho WebSocket STOMP. |
 | **Xác thực & Phiên** | Stateless JWT (JJWT 0.12.6) + HttpOnly Cookie | `AccessToken` (15 phút) nằm ở Client Memory chống XSS; `RefreshToken` (7 ngày) lưu trong HttpOnly, Secure, SameSite=Lax Cookie; quản lý phiên qua Redis key `auth:refresh-session:{sessionId}`. |
 | **Bảo mật PII** | AES-256-GCM (Java Cryptography) | Số căn cước công dân (CCCD) được mã hóa trước khi ghi vào database. Khóa bí mật lấy từ biến môi trường, chỉ giải mã in-memory khi Admin vào luồng duyệt hồ sơ KYC. |
 | **Lưu trữ tệp tin** | Cloudinary Cloud Storage | Upload stream trực tiếp qua `InputStream` lên Cloudinary theo phân cấp cha-con (`phongtroxanh/{rooms,avatars,kyc,dispute-evidence,misc}`); không ghi đĩa tạm, tương thích hoàn toàn PaaS Ephemeral Filesystem (Render/Railway). |
-| **Cổng thanh toán** | VNPay Sandbox (HMAC-SHA512) | Thanh toán nạp gói hội viên (Free, Pro Tenant, Landlord VIP) và lượt consumable. Xử lý IPN Webhook với cơ chế Idempotent dựa trên PostgreSQL Unique Constraint. |
+| **Cổng thanh toán** | payOS (SDK Java chính thức, webhook ký HMAC) | Thanh toán nạp gói hội viên (Free, Pro Tenant, Landlord VIP) và lượt consumable. Webhook ký hợp lệ khóa giao dịch và cộng quyền lợi một lần cho mỗi đơn. |
 | **Email dịch vụ** | Brevo REST API v3 (Port 443 HTTPS) | Gửi OTP đăng ký, cấp lại mật khẩu qua giao thức HTTPS. Giải quyết triệt để lỗi timeout do bị chặn cổng TCP SMTP (25, 465, 587) trên môi trường Cloud miễn phí. Hỗ trợ fallback `console` cho local dev. |
 | **Bản đồ & Tọa độ** | Goong Maps REST API | Geocoding chuyển địa chỉ tiếng Việt thành tọa độ PostGIS khi chủ trọ đăng phòng thiếu tọa độ; Autocomplete địa chỉ có Redis cache 24h. |
 | **Realtime Chat** | STOMP over WebSocket (`/ws/chat`) | Client trao đổi tin nhắn trực tiếp qua WebSocket; Redis Pub/Sub điều phối sự kiện giữa các kết nối; lưu trữ lịch sử tin nhắn trong PostgreSQL. |
@@ -87,21 +89,21 @@ flowchart TB
         subgraph Common["Common Ports & Adapters (common.*)"]
             StoragePort["FileStoragePort<br/>(CloudinaryStorageAdapter)"]
             MailPort["EmailNotificationPort<br/>(BrevoEmailAdapter)"]
-            PaymentPort["PaymentGatewayPort<br/>(VnPayPaymentAdapter)"]
+            PaymentPort["PayOsPaymentAdapter<br/>(official payOS SDK)"]
             GeoPort["GeocodingPort<br/>(GoongMapsAdapter)"]
             CryptoUtil["CryptoUtils (AES-256-GCM)"]
         end
     end
 
     subgraph DataStorage["Data & Infrastructure"]
-        PostgresDB[("PostgreSQL 16 + PostGIS<br/>(25 Tables, GIST Index)")]
+        PostgresDB[("PostgreSQL 18 + PostGIS<br/>(25 Tables, GIST Index)")]
         RedisCache[("Redis 7<br/>(Sessions, Cache, Pub/Sub)")]
     end
 
     subgraph ThirdPartyServices["Third-Party APIs"]
         CloudinaryAPI["Cloudinary API"]
         BrevoAPI["Brevo Mail REST API"]
-        VNPayAPI["VNPay Sandbox Gateway"]
+        PayOSAPI["payOS Gateway"]
         GoongAPI["Goong Maps API"]
     end
 
@@ -114,7 +116,7 @@ flowchart TB
 
     StoragePort --> CloudinaryAPI
     MailPort --> BrevoAPI
-    PaymentPort --> VNPayAPI
+    PaymentPort --> PayOSAPI
     GeoPort --> GoongAPI
 ```
 
@@ -144,7 +146,7 @@ $$\text{MatchingScore} = \sum_{i=1}^{8} (W_i \times S_i) \quad \in [0, 100]$$
   WHERE user_id = :userId AND swipes_left > 0;
   ```
   Nếu kết quả trả về `0 rows affected`, hệ thống ném `AppException(CONSUMABLE_EXHAUSTED)` ngay lập tức; không xảy ra hiện tượng quẹt âm số dư khi người dùng spam click.
-* **Xử lý IPN Webhook VNPay (Idempotency):** Cổng thanh toán có thể retry IPN nhiều lần. Hệ thống thiết lập chỉ mục `UNIQUE (idempotency_key)` trong bảng giao dịch. Request thứ 2 cùng mã giao dịch sẽ bị chặn bởi Database Constraint, đảm bảo người dùng không bao giờ bị cộng thừa số dư.
+* **Xử lý webhook payOS (Idempotency):** Handler khóa đơn và chỉ cộng quyền lợi khi PENDING; gửi lại SUCCESS được xác nhận mà không cộng lặp. Header Idempotency-Key tránh tạo checkout mới khi retry.
 * **Xung đột trạng thái phòng trọ:** Sử dụng **Optimistic Locking (`@Version`)** trên entity `Room` để ngăn chặn hai người cùng đặt cọc hoặc đổi trạng thái phòng tại cùng một thời điểm.
 
 ### 3.3. Dynamic QR Check-in & Chống Gian Lận Đặt Cọc
@@ -172,7 +174,7 @@ d:\EXE\backend\src\main\java\vn\phongtroxanh\backend
 │   ├── exception/                      # AppException, ErrorCode, GlobalExceptionHandler
 │   ├── location/                       # GeocodingPort, GoongMapsAdapter
 │   ├── mail/                           # EmailNotificationPort, BrevoEmailAdapter
-│   ├── payment/                        # PaymentGatewayPort, VnPayPaymentAdapter
+│   ├── payment/                        # PayOsPaymentAdapter (official SDK)
 │   ├── repository/                     # Base repositories
 │   ├── security/                       # JwtTokenProvider, JwtAuthFilter, UserPrincipal
 │   ├── storage/                        # FileStoragePort, CloudinaryStorageAdapter
@@ -184,7 +186,7 @@ d:\EXE\backend\src\main\java\vn\phongtroxanh\backend
     ├── location/                       # Goong Maps Autocomplete, Geocoding & Reverse Geocoding
     ├── matching/                       # Discovery Feed, Quẹt thẻ (Swipe), Mutual Match, MatchingEngine 8 trụ cột
     ├── misc/                           # Thống kê công khai trang chủ (Landing stats)
-    ├── monetization/                   # Gói cước (Plans), Thanh toán VNPay Sandbox, Consumables
+    ├── monetization/                   # Gói cước (Plans), Thanh toán payOS, Consumables
     ├── notification/                   # Thông báo In-App, Đăng ký FCM Device Token
     ├── rental/                         # Hợp đồng thuê, Dynamic Check-in QR Token chống Replay
     ├── review/                         # Đánh giá 2 chiều sau thuê, Upload bằng chứng đối chất, Khiếu nại
@@ -202,10 +204,10 @@ d:\EXE\backend\src\main\java\vn\phongtroxanh\backend
 | **Room & Spatial** | `/api/v1/rooms` | **15** | Tìm kiếm phòng trọ, PostGIS MapView, so sánh phòng, bookmark yêu thích, CRUD phòng của chủ trọ, upload ảnh, boost phòng. |
 | **Matching Engine** | `/api/v1/matching` | **8** | Discovery feed bạn cùng phòng, quẹt hồ sơ (LIKE/DISLIKE/SUPER_LIKE), phát hiện mutual match, danh sách kết đôi. |
 | **Room Swap** | `/api/v1/swaps` | **5** | Đăng tin hoán đổi/nhượng phòng, tìm kiếm tin pass phòng, gửi đề xuất hoán đổi, chủ trọ phê duyệt. |
-| **Rentals & QR** | `/api/v1/rentals` | **7** | Tạo yêu cầu thuê, hợp đồng thuê điện tử, sinh mã QR Check-in động (TTL 5p), quét QR kích hoạt hợp đồng. |
+| **Rentals & QR** | `/api/v1/rentals` | **7** | Tạo yêu cầu thuê, hồ sơ thuê, sinh mã QR Check-in động (TTL 5p), quét QR kích hoạt hợp đồng. |
 | **Reviews & Disputes** | `/api/v1/reviews` | **8** | Đánh giá 2 chiều sau thuê, upload ảnh bằng chứng, phản hồi đánh giá, gửi đơn khiếu nại đánh giá sai sự thật. |
 | **Realtime Chat** | `/api/v1/chat` + WS | **5 + 1 WS** | Lấy danh sách hội thoại, lịch sử tin nhắn, gửi tin nhắn REST & STOMP WebSocket qua endpoint `/ws/chat`. |
-| **Monetization** | `/api/v1/monetization` | **7** | Danh sách gói dịch vụ, tạo URL thanh toán VNPay Sandbox, xử lý IPN Webhook, lịch sử giao dịch. |
+| **Monetization** | `/api/v1/monetization` | **7** | Danh sách gói dịch vụ, tạo URL thanh toán payOS, xác minh webhook, lịch sử giao dịch. |
 | **Admin Control** | `/api/v1/admin` | **12** | Thống kê KPI, duyệt hồ sơ CCCD (giải mã AES in-memory), khóa/mở user, duyệt tích xanh phòng, xử lý khiếu nại. |
 | **Location Services** | `/api/v1/locations` | **3** | Autocomplete địa chỉ Việt Nam (Redis cache 24h), Geocoding tọa độ, Reverse-Geocoding. |
 | **Landing Stats** | `/api/v1/misc` | **1** | Thống kê số phòng, số lượt ghép đôi thành công, tỷ lệ hài lòng phục vụ trang chủ. |
@@ -213,18 +215,32 @@ d:\EXE\backend\src\main\java\vn\phongtroxanh\backend
 
 ---
 
-## 5. Cơ Sở Dữ Liệu (Database Architecture)
+## 5. Cơ Sở Dữ Liệu & Migrations (Database Architecture)
 
-Cơ sở dữ liệu bao gồm **25 bảng quan hệ**, toàn bộ sử dụng `UUID v4` (`gen_random_uuid()`) làm khóa chính để chống lộ số lượng bản ghi kinh doanh và tương thích chuẩn phân tán.
+Cơ sở dữ liệu được quản lý tự động qua **Flyway Migrations** gồm **25 bảng quan hệ**, toàn bộ sử dụng UUID v4 (gen_random_uuid()) làm khóa chính để chống lộ số lượng bản ghi kinh doanh và tương thích chuẩn phân tán:
 
-* **Nhóm Người Dùng & Bảo Mật:** `users`, `user_matching_profiles`, `user_trust_scores`, `user_verifications`, `user_settings`.
-* **Nhóm Phòng Trọ & Không Gian:** `rooms` (chứa cột `location geometry(Point, 4326)`), `room_images`, `room_fees`, `saved_rooms`.
-* **Nhóm Ghép Đôi & Hoán Đổi:** `user_swipes`, `roommate_matches`, `room_swaps`, `swap_requests`.
-* **Nhóm Hợp Đồng & Đánh Giá:** `rental_contracts`, `rental_reviews`, `review_evidence`, `review_disputes`.
-* **Nhóm Giao Dịch & Gói Cước:** `subscription_plans`, `user_subscriptions`, `user_consumables`, `payment_transactions`.
-* **Nhóm Trò Chuyện & Tương Tác:** `chat_conversations`, `chat_messages`, `notifications`.
+* **Nhóm Người Dùng & Bảo Mật:** users, user_matching_profiles, user_trust_scores, user_verifications, user_settings.
+* **Nhóm Phòng Trọ & Không Gian:** 
+ooms (chứa cột location geometry(Point, 4326)), 
+oom_images, 
+oom_fees, saved_rooms, 
+oom_swipes.
+* **Nhóm Ghép Đôi & Hoán Đổi:** user_swipes, 
+oommate_matches, 
+oom_swaps, swap_requests.
+* **Nhóm Hợp Đồng & Đánh Giá:** 
+ental_contracts, 
+ental_reviews, 
+eview_evidence, 
+eview_disputes.
+* **Nhóm Giao Dịch & Gói Cước:** subscription_plans, user_subscriptions, user_consumables, payment_transactions, payos_order_code_seq.
+* **Nhóm Trò Chuyện & Tương Tác:** chat_conversations, chat_messages, 
+otifications.
 
-Script khởi tạo toàn bộ schema, indexes và triggers tự động cập nhật `updated_at` được lưu tại [`docs/DATABASE_SCHEMA.sql`](./docs/DATABASE_SCHEMA.sql).
+### Bộ Script Migration Chuẩn Hóa (src/main/resources/db/migration/)
+1. **V1__init_schema.sql**: Khởi tạo DDL bảng, PostGIS extension, kiểu ENUM và khóa ngoại toàn hệ thống.
+2. **V2__seed_system_data.sql**: Nạp dữ liệu mẫu chuẩn cho các gói đăng tin/hội viên (Free, Pro Tenant, Landlord VIP), loại phòng và tài khoản Admin mặc định (dmin@phongtroxanh.vn).
+3. **V3__postgis_spatial_and_indexes.sql**: Đánh chỉ mục không gian GiST cho truy vấn bán kính ST_DWithin, trigger tự động đồng bộ geometry và ràng buộc chống trùng lặp giao dịch thanh toán.
 
 ---
 
@@ -232,28 +248,28 @@ Script khởi tạo toàn bộ schema, indexes và triggers tự động cập n
 
 ### Yêu Cầu Tiên Quyết
 * **Java:** OpenJDK 21 LTS trở lên.
-* **Build Tool:** Apache Maven 3.9+ (hoặc dùng wrapper `mvnw.cmd` / `mvnw` đi kèm).
+* **Build Tool:** Apache Maven 3.9+ (hoặc dùng wrapper mvnw.cmd / mvnw đi kèm).
 * **Docker & Docker Compose:** Để khởi động PostgreSQL (PostGIS) và Redis cục bộ.
 
 ### Bước 1: Khởi động CSDL và Redis qua Docker
 Từ thư mục gốc của backend, khởi chạy hai container:
-```bash
+`ash
 docker compose up -d
-```
+`
 Kiểm tra trạng thái container:
-```bash
+`ash
 docker compose ps
-```
-* Container `phongtroxanh-postgres` chạy tại cổng `5433` (đã tự động nạp PostGIS và chạy schema `docs/DATABASE_SCHEMA.sql`).
-* Container `phongtroxanh-redis` chạy tại cổng `6379`.
+`
+* Container phongtroxanh-postgres chạy tại cổng 5433 (đã nạp sẵn PostGIS extension). Flyway sẽ tự động migrate các file V1-V3 khi ứng dụng Spring Boot khởi động.
+* Container phongtroxanh-redis chạy tại cổng 6379.
 
 ### Bước 2: Thiết lập biến môi trường (.env)
-Tạo file `.env` từ file mẫu:
-```bash
+Tạo file .env từ file mẫu:
+`ash
 cp .env.example .env
-```
+`
 Cấu hình các thông số tối thiểu:
-```properties
+`properties
 SPRING_PROFILES_ACTIVE=dev
 SERVER_PORT=8080
 DB_HOST=localhost
@@ -268,9 +284,10 @@ REDIS_PORT=6379
 # JWT HS512 secret (ít nhất 64 ký tự)
 JWT_SECRET=4c6f6e675f616e645f73757065725f7365637265745f6a77745f6b65795f666f725f70686f6e6774726f78616e685f766e5f68733531325f73656375726974795f746f6b656e
 
-# Cổng thanh toán VNPay Sandbox
-VNPAY_TMN_CODE=TESTVNPAY
-VNPAY_HASH_SECRET=TESTHASHSECRET1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF
+# Cổng thanh toán payOS (VietQR ngân hàng tự động)
+PAYOS_CLIENT_ID=your_client_id
+PAYOS_API_KEY=your_api_key
+PAYOS_CHECKSUM_KEY=your_checksum_key
 
 # Email (chọn 'console' để in ra log khi test local hoặc 'brevo' kèm BREVO_API_KEY)
 MAIL_PROVIDER=console
@@ -282,11 +299,11 @@ CLOUDINARY_API_SECRET=your_api_secret
 
 # Goong Maps API
 GOONG_API_KEY=your_goong_api_key
-```
+`
 
-### Bước 3: Biên dịch & Kiểm thử đơn vị
-Biên dịch 199 source files và chạy kiểm thử tự động:
-```bash
+### Bước 3: Biên dịch & Chạy bộ kiểm thử tự động
+Biên dịch mã nguồn và chạy toàn bộ 22 bộ kiểm thử tự động:
+`ash
 # Windows
 .\mvnw.cmd clean compile
 .\mvnw.cmd test
@@ -294,54 +311,62 @@ Biên dịch 199 source files và chạy kiểm thử tự động:
 # Linux / macOS
 ./mvnw clean compile
 ./mvnw test
-```
+`
 
 ### Bước 4: Khởi chạy Backend Server
-```bash
+`ash
 # Windows
 .\mvnw.cmd spring-boot:run
 
 # Linux / macOS
 ./mvnw spring-boot:run
-```
-Ứng dụng sẽ lắng nghe tại: `http://localhost:8080`
+`
+Ứng dụng sẽ lắng nghe tại: http://localhost:8080
 
 ### Bước 5: Truy cập Tài Liệu API & Health Check
-* **Swagger UI (OpenAPI 3):** `http://localhost:8080/swagger-ui.html`
-* **OpenAPI Specification (JSON):** `http://localhost:8080/v3/api-docs`
-* **Spring Actuator Health:** `http://localhost:8080/actuator/health`
+* **Swagger UI (OpenAPI 3):** http://localhost:8080/swagger-ui.html
+* **OpenAPI Specification (JSON):** http://localhost:8080/v3/api-docs
+* **Spring Actuator Health:** http://localhost:8080/actuator/health
 
 ---
 
-## 7. Kiểm Thử Tự Động & Đảm Bảo Chất Lượng (Quality Assurance)
+## 7. Kiểm Thử & Đảm Bảo Chất Lượng (Quality Assurance)
 
-Dự án trang bị 3 cấp độ kiểm thử độc lập:
+Hệ thống được bảo vệ bởi **22 bộ kiểm thử tự động toàn diện** đặt tại src/test/java/vn/phongtroxanh/backend/:
 
-1. **Unit & Integration Tests (JUnit 5 + Mockito):**
-   * Chạy qua Maven: `.\mvnw.cmd test`
-   * Kiểm thử context Spring Boot, bộ mã hóa `AesGcmEncryptionConverter`, thuật toán `MatchingEngine`.
-2. **Fast Live E2E Smoke Test ([`scripts/e2e_smoke_test.py`](./scripts/e2e_smoke_test.py)):**
-   * Kiểm tra nhanh 14 luồng nghiệp vụ nối tiếp từ Đăng ký, Đăng nhập, Đăng phòng, Tìm phòng GIS, Tạo hợp đồng, Sinh và Quét mã QR Check-in, Review 5 sao, Nạp gói.
-   * Chạy không cần cài thư viện ngoài (sử dụng thư viện chuẩn `urllib` của Python 3):
-     ```bash
-     python scripts/e2e_smoke_test.py
-     ```
-3. **Full API Matrix Test Runner ([`scripts/test_full_api_matrix.py`](./scripts/test_full_api_matrix.py)):**
-   * Quét toàn bộ ma trận **105 API endpoints (184 test cases)** bao phủ cả Happy Path lẫn Unhappy Path (Anti-BOLA, RBAC 403, Validation 400).
-   * Báo cáo kết quả chi tiết xem tại [`docs/TEST_REPORT.md`](./docs/TEST_REPORT.md) (Đạt chuẩn Zero 500 Defect Guarantee).
-4. **Unhappy & Security Defenses Test ([`scripts/test_unhappy_paths.py`](./scripts/test_unhappy_paths.py)):**
-   * Kiểm thử chuyên sâu các kịch bản phá vỡ bảo mật: Token giả mạo, truy cập trái quyền BOLA/IDOR, nhập sai định dạng, spam OTP.
+* **Cổng Thanh Toán & PayOS Integration:**
+  - PayOsSignatureTest: Kiểm tra thuật toán băm HMAC SHA-256 xác thực chữ ký webhook.
+  - PayOsFlowIntegrationTest: Luồng tạo link thanh toán VietQR, tính lũy kế idempotency và cập nhật trạng thái đơn hàng.
+  - PaymentServiceTest: Kiểm thử bảng giá gói hội viên và kiểm toán lịch sử giao dịch.
+* **Xử Lý Đồng Thời & Race Conditions:**
+  - ConcurrentMatchingDatabaseTest: Mô phỏng nhiều người dùng cùng quẹt ghép đôi một thời điểm.
+  - DailySwipeQuotaDatabaseTest: Kiểm tra câu lệnh atomic SQL trừ quota, đảm bảo không âm số lượt quẹt.
+  - AuthRaceIntegrationTest: Chống đăng ký trùng lặp tài khoản khi có request song song.
+* **Bảo Mật & Phân Quyền:**
+  - AuthSecurityRegressionTest: Kiểm tra luồng cấp lại AccessToken và từ chối token giả mạo.
+  - ChatSecurityRegressionTest: Phân quyền channel WebSocket STOMP, cô lập dữ liệu chat giữa các cặp người dùng.
+  - AccessSecurityRegressionTest: Kiểm soát quyền truy cập theo vai trò (ROLE_TENANT, ROLE_LANDLORD, ROLE_ADMIN).
+* **Nghiệp Vụ Cốt Lõi & Hàng Đợi KYC:**
+  - AdminIntegrityTest: Kiểm tra tính toán số liệu thống kê Dashboard và phân trang hàng đợi duyệt CCCD.
+  - RoomServiceTest & RoomRequestValidationTest: Kiểm tra tìm kiếm không gian PostGIS và thuật toán pHash chống trùng ảnh phòng.
+  - RentalServiceTest & RoomSwapServiceTest: Vòng đời hợp đồng thuê, sinh mã QR check-in dùng 1 lần và phê duyệt đổi phòng.
+  - ReviewIntegrityTest: Tính điểm tín nhiệm 2 chiều và quy trình xử lý khiếu nại đánh giá.
+
+Chạy toàn bộ test suites:
+`powershell
+mvn clean test
+`
 
 ---
 
 ## 8. Tài Liệu Kỹ Thuật Bổ Trợ (Documentation Index)
 
-Toàn bộ tài liệu thiết kế và quy chuẩn kỹ thuật được lưu trữ trong thư mục [`docs/`](./docs/):
+Tài liệu thiết kế được lưu trữ trong thư mục [docs/](./docs/):
 
-* [`SYSTEM_SPECIFICATION.md`](./docs/SYSTEM_SPECIFICATION.md): Đặc tả chi tiết 105 API endpoints và quy tắc nghiệp vụ.
-* [`CODING_RULES.md`](./docs/CODING_RULES.md): 26 chương quy chuẩn kiến trúc, quy tắc phân lớp, chuẩn đặt tên và Definition of Done.
-* [`ARCHITECTURE_DECISIONS.md`](./docs/ARCHITECTURE_DECISIONS.md): 11 bản ghi quyết định kiến trúc (ADR-001 đến ADR-011).
-* [`DATABASE_SCHEMA.sql`](./docs/DATABASE_SCHEMA.sql): DDL khởi tạo toàn bộ 25 bảng CSDL, types, indexes và triggers.
-* [`THIRD_PARTY_INTEGRATION_GUIDE.md`](./docs/THIRD_PARTY_INTEGRATION_GUIDE.md): Hướng dẫn chi tiết đăng ký credentials cho Cloudinary, Brevo, Goong Maps và VNPay.
-* [`TEST_REPORT.md`](./docs/TEST_REPORT.md): Báo cáo kiểm thử ma trận 105 endpoints đạt chuẩn Zero 500 Defect Guarantee.
-* [`CODEBASE_OVERVIEW.md`](./docs/CODEBASE_OVERVIEW.md): Tài liệu phân tích kiến trúc hệ thống dành cho kỹ sư phần mềm.
+* [system-specification.md](./docs/system-specification.md): Đặc tả chi tiết 105 API endpoints và quy tắc nghiệp vụ.
+* [coding-rules.md](./docs/coding-rules.md): 26 chương quy chuẩn kiến trúc, quy tắc phân lớp, chuẩn đặt tên và Definition of Done.
+* [rchitecture-decisions.md](./docs/architecture-decisions.md): 11 bản ghi quyết định kiến trúc (ADR-001 đến ADR-011).
+* [payos-setup.md](./docs/payos-setup.md): Hướng dẫn kết nối cổng thanh toán PayOS VietQR và xử lý webhook.
+* [	hird-party-integrations.md](./docs/third-party-integrations.md): Hướng dẫn chi tiết đăng ký credentials cho Cloudinary, Brevo, Goong Maps, Google OAuth và payOS.
+* [ackend-verification.md](docs/backend-verification.md): Báo cáo bằng chứng kiểm thử các luồng chức năng thực tế.
+* [codebase-overview.md](./docs/codebase-overview.md): Tài liệu phân tích kiến trúc hệ thống chuyên sâu cho lập trình viên.

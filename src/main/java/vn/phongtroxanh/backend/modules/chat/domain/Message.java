@@ -29,6 +29,9 @@ public class Message {
     @Column(name = "content", columnDefinition = "TEXT", nullable = false)
     private String content;
 
+    @Column(name = "attachment_url", length = 2000)
+    private String attachmentUrl;
+
     @Column(name = "is_read")
     @Builder.Default
     private Boolean isRead = false;

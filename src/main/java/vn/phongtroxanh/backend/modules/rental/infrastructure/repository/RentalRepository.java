@@ -19,4 +19,6 @@ public interface RentalRepository extends JpaRepository<Rental, UUID> {
     List<Rental> findByRoomIdAndStatus(UUID roomId, RentalStatus status);
 
     Optional<Rental> findByIdAndCheckInCode(UUID id, String checkInCode);
+
+    Optional<Rental> findFirstByTenantIdAndRoomIdOrderByCreatedAtDesc(UUID tenantId, UUID roomId);
 }

@@ -10,5 +10,4 @@ import lombok.*;
 public class ConsumableBalanceResponse {
     private int swipesLeft;
     private int boostsLeft;
-    private int superMatchesLeft;
 }
