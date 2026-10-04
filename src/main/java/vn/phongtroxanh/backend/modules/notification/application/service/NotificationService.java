@@ -17,6 +17,12 @@ import vn.phongtroxanh.backend.modules.notification.presentation.dto.DeviceToken
 import vn.phongtroxanh.backend.modules.notification.presentation.dto.NotificationResponse;
 
 import java.util.UUID;
+import java.util.List;
+import java.util.Map;
+import vn.phongtroxanh.backend.modules.notification.domain.NotificationType;
+import vn.phongtroxanh.backend.modules.user.domain.User;
+import vn.phongtroxanh.backend.modules.user.domain.UserStatus;
+import vn.phongtroxanh.backend.modules.user.infrastructure.repository.UserRepository;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
@@ -25,7 +31,33 @@ import java.util.concurrent.TimeUnit;
 public class NotificationService {
 
     private final NotificationRepository notificationRepository;
+    private final UserRepository userRepository;
     private final RedisTemplate<String, Object> redisTemplate;
+
+    @Transactional
+    public void create(UUID userId, String title, String body, NotificationType type, Map<String, Object> data) {
+        notificationRepository.save(Notification.builder().userId(userId).title(title).body(body).type(type).data(data).build());
+    }
+
+    @Transactional
+    public void broadcast(String title, String body, NotificationType type, Map<String, Object> data) {
+        List<User> users = userRepository.findAll();
+        List<Notification> batch = users.stream()
+                .filter(u -> u.getStatus() != UserStatus.DELETED && u.getStatus() != UserStatus.LOCKED)
+                .map(u -> Notification.builder()
+                        .userId(u.getId())
+                        .title(title)
+                        .body(body)
+                        .type(type)
+                        .data(data)
+                        .isRead(false)
+                        .build())
+                .toList();
+        if (!batch.isEmpty()) {
+            notificationRepository.saveAll(batch);
+            log.info("Broadcasted notification '{}' to {} users", title, batch.size());
+        }
+    }
 
     public Page<NotificationResponse> getUserNotifications(int page, int limit) {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
