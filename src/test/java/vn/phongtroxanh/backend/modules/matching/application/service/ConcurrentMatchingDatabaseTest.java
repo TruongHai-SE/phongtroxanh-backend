@@ -61,7 +61,7 @@ class ConcurrentMatchingDatabaseTest {
             UUID current = invocation.getArgument(0);
             UUID target = invocation.getArgument(1);
             var result = jdbc.query("SELECT id, swiper_id, target_id, direction FROM swipes " +
-                            "WHERE swiper_id = ? AND target_id = ? AND direction IN ('RIGHT', 'SUPER')",
+                            "WHERE swiper_id = ? AND target_id = ? AND direction = 'RIGHT'",
                     (rs, row) -> Swipe.builder().id((UUID) rs.getObject("id"))
                             .swiperId((UUID) rs.getObject("swiper_id")).targetId((UUID) rs.getObject("target_id"))
                             .action(new SwipeActionConverter().convertToEntityAttribute(rs.getString("direction"))).build(), target, current).stream().findFirst();
