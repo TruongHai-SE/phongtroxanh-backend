@@ -36,20 +36,21 @@ public class RoomController {
             @RequestParam(value = "maxPrice", required = false) BigDecimal maxPrice,
             @RequestParam(value = "keyword", required = false) String keyword,
             @RequestParam(value = "sortBy", required = false, defaultValue = "boost_first") String sortBy,
+            @RequestParam(value = "excludeSwiped", required = false, defaultValue = "false") boolean excludeSwiped,
             @RequestParam(value = "page", required = false, defaultValue = "0") int page,
             @RequestParam(value = "limit", required = false, defaultValue = "20") int limit) {
 
         Page<RoomSummaryResponse> result = roomService.searchRooms(
-                district, roomType, minPrice, maxPrice, keyword, sortBy, page, limit);
+                district, roomType, minPrice, maxPrice, keyword, sortBy, excludeSwiped, page, limit);
         return ResponseEntity.ok(ApiResponse.ok("Lấy danh sách phòng trọ thành công", result));
     }
 
     @GetMapping("/map")
     @Operation(summary = "API #26: Lấy danh sách ghim bản đồ PostGIS (MapView)", description = "Lấy danh sách các ghim phòng trọ trên bản đồ trong bán kính (ST_DWithin) dạng rút gọn tối ưu hiệu năng")
     public ResponseEntity<ApiResponse<List<MapPinResponse>>> getRoomsOnMap(
-            @RequestParam("lat") double lat,
-            @RequestParam("lng") double lng,
-            @RequestParam(value = "radiusKm", required = false, defaultValue = "5.0") Double radiusKm,
+            @RequestParam(value = "lat", required = false, defaultValue = "10.776") double lat,
+            @RequestParam(value = "lng", required = false, defaultValue = "106.667") double lng,
+            @RequestParam(value = "radiusKm", required = false, defaultValue = "30.0") Double radiusKm,
             @RequestParam(value = "minPrice", required = false) BigDecimal minPrice,
             @RequestParam(value = "maxPrice", required = false) BigDecimal maxPrice,
             @RequestParam(value = "district", required = false) String district,
@@ -92,6 +93,22 @@ public class RoomController {
     @Operation(summary = "API #31: Danh sách phòng trọ đã lưu", description = "Lấy toàn bộ danh sách phòng trọ mà người dùng hiện tại đã bookmark")
     public ResponseEntity<ApiResponse<List<RoomSummaryResponse>>> getSavedRooms() {
         return ResponseEntity.ok(ApiResponse.ok("Lấy danh sách phòng đã lưu thành công", roomService.getSavedRooms()));
+    }
+
+    @PostMapping("/{id}/swipe")
+    @Operation(summary = "API #39: Quẹt phòng trọ (LIKE / PASS)", description = "Thực hiện hành động quẹt phòng, tự động trừ lượt quẹt và lưu phòng nếu LIKE")
+    public ResponseEntity<ApiResponse<Void>> swipeRoom(
+            @PathVariable("id") UUID id,
+            @Valid @RequestBody RoomSwipeRequest request) {
+        roomService.swipeRoom(id, request);
+        return ResponseEntity.ok(ApiResponse.ok("Ghi nhận hành động quẹt phòng thành công", null));
+    }
+
+    @DeleteMapping("/swipes/me")
+    @Operation(summary = "API #39b: Đặt lại lịch sử quẹt phòng", description = "Xóa toàn bộ các phòng đã quẹt để bắt đầu lại feed khám phá")
+    public ResponseEntity<ApiResponse<Void>> resetSwipes() {
+        roomService.resetSwipes();
+        return ResponseEntity.ok(ApiResponse.ok("Đã đặt lại danh sách phòng đã xem", null));
     }
 
     @PostMapping
@@ -154,5 +171,13 @@ public class RoomController {
     public ResponseEntity<ApiResponse<Void>> boostRoom(@PathVariable("id") UUID id) {
         roomService.boostRoom(id);
         return ResponseEntity.ok(ApiResponse.ok("Đẩy tin phòng trọ thành công trong 7 ngày", null));
+    }
+
+    @PostMapping("/{id}/renew")
+    @PreAuthorize("hasRole('LANDLORD') or hasRole('ADMIN')")
+    @Operation(summary = "API #38b: Gia hạn tin đăng phòng trọ", description = "Gia hạn thêm 30 ngày cho tin đăng phòng trọ, tự động kích hoạt lại nếu đã hết hạn")
+    public ResponseEntity<ApiResponse<RoomDetailResponse>> renewRoom(@PathVariable("id") UUID id) {
+        RoomDetailResponse response = roomService.renewRoom(id);
+        return ResponseEntity.ok(ApiResponse.ok("Gia hạn tin đăng phòng thành công thêm 30 ngày", response));
     }
 }

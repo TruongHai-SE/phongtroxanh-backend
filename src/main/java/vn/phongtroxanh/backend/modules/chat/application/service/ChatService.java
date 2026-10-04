@@ -26,6 +26,8 @@ import vn.phongtroxanh.backend.modules.room.domain.Room;
 import vn.phongtroxanh.backend.modules.room.infrastructure.repository.RoomRepository;
 import vn.phongtroxanh.backend.modules.user.domain.User;
 import vn.phongtroxanh.backend.modules.user.infrastructure.repository.UserRepository;
+import vn.phongtroxanh.backend.modules.notification.application.service.NotificationService;
+import vn.phongtroxanh.backend.modules.notification.domain.NotificationType;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -42,6 +44,7 @@ public class ChatService {
     private final UserRepository userRepository;
     private final RoomRepository roomRepository;
     private final RedisChatPublisher redisChatPublisher;
+    private final NotificationService notificationService;
 
     public List<ConversationResponse> getConversations() {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
@@ -100,7 +103,7 @@ public class ChatService {
                     .senderName(sender != null ? sender.getFullName() : "Người gửi")
                     .senderAvatar(sender != null ? sender.getAvatarUrl() : null)
                     .content(m.getContent())
-                    .attachmentUrl(null)
+                    .attachmentUrl(m.getAttachmentUrl())
                     .isRead(m.getIsRead())
                     .createdAt(m.getCreatedAt())
                     .build();
@@ -115,15 +118,31 @@ public class ChatService {
 
     @Transactional
     public MessageResponse sendMessageInternal(UUID conversationId, UUID senderId, String content, String attachmentUrl) {
+        if (conversationId == null || senderId == null || content == null || content.isBlank() || content.length() > 2000) {
+            throw new BadRequestException("INVALID_MESSAGE", "Tin nhắn cần hội thoại và nội dung từ 1 đến 2000 ký tự");
+        }
+        if (attachmentUrl != null && !attachmentUrl.isBlank()) {
+            try {
+                var uri = java.net.URI.create(attachmentUrl);
+                if (attachmentUrl.length() > 2000 || !"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null) {
+                    throw new IllegalArgumentException();
+                }
+            } catch (IllegalArgumentException ex) {
+                throw new BadRequestException("INVALID_ATTACHMENT", "Đường dẫn tệp đính kèm phải là HTTPS hợp lệ");
+            }
+        }
         Conversation c = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ResourceNotFoundException("CONVERSATION_NOT_FOUND", "Không tìm thấy cuộc trò chuyện"));
 
-        assertParticipant(c, senderId);
+        if (!senderId.equals(c.getParticipantOneId()) && !senderId.equals(c.getParticipantTwoId())) {
+            throw new ForbiddenException("BOLA_FORBIDDEN", "Bạn không phải thành viên của cuộc trò chuyện này");
+        }
 
         Message msg = Message.builder()
                 .conversationId(conversationId)
                 .senderId(senderId)
                 .content(content)
+                .attachmentUrl(attachmentUrl)
                 .isRead(false)
                 .build();
 
@@ -134,6 +153,10 @@ public class ChatService {
         conversationRepository.save(c);
 
         User sender = userRepository.findById(senderId).orElse(null);
+
+        UUID recipientId = senderId.equals(c.getParticipantOneId()) ? c.getParticipantTwoId() : c.getParticipantOneId();
+        notificationService.create(recipientId, "Tin nhắn mới", content, NotificationType.MESSAGE,
+                java.util.Map.of("conversationId", conversationId.toString(), "senderId", senderId.toString()));
 
         ChatMessagePayload payload = ChatMessagePayload.builder()
                 .messageId(msg.getId())

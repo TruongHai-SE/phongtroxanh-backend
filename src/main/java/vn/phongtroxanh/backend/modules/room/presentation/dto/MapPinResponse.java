@@ -20,4 +20,22 @@ public class MapPinResponse {
     private String primaryImageUrl;
     private String roomType;
     private Boolean isBoosted;
+    private String district;
+    private BigDecimal areaSqm;
+
+    public Double getLat() {
+        return latitude;
+    }
+
+    public Double getLng() {
+        return longitude;
+    }
+
+    public String getImage() {
+        return primaryImageUrl;
+    }
+
+    public String getType() {
+        return roomType;
+    }
 }

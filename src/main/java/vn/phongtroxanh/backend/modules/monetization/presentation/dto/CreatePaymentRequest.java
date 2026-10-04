@@ -15,8 +15,8 @@ public class CreatePaymentRequest {
     @NotBlank(message = "packageId không được để trống")
     private String packageId;
 
-    @NotNull(message = "Phương thức thanh toán không được để trống")
-    private PaymentMethod paymentMethod;
+    @Builder.Default
+    private PaymentMethod paymentMethod = PaymentMethod.PAYOS;
 
     private String returnUrl;
 }

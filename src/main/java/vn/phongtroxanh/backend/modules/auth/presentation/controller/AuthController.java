@@ -98,8 +98,14 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.ok("Đăng nhập Google thành công", authResponse));
     }
 
+    @GetMapping("/oauth/google/client-id")
+    @Operation(summary = "Lấy Google Client ID công khai", description = "Cung cấp Client ID cấu hình trên Backend cho Client khởi tạo Google SDK")
+    public ResponseEntity<ApiResponse<java.util.Map<String, String>>> getGoogleClientId() {
+        return ResponseEntity.ok(ApiResponse.ok("Thành công", java.util.Map.of("clientId", authService.getGoogleClientId())));
+    }
+
     @PostMapping("/onboarding/tenant")
-    @PreAuthorize("hasRole('TENANT')")
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "API #10: Onboarding người thuê (4 bước)", description = "Lưu dữ liệu 4 bước Onboarding người thuê: Sở thích, Lối sống & Giờ giấc, Nhu cầu ở, Giấy tờ")
     public ResponseEntity<ApiResponse<Void>> tenantOnboarding(@Valid @RequestBody TenantOnboardingRequest request) {
         authService.tenantOnboarding(request);
@@ -107,7 +113,7 @@ public class AuthController {
     }
 
     @PostMapping("/onboarding/landlord")
-    @PreAuthorize("hasRole('LANDLORD')")
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "API #11: Onboarding chủ trọ (3 bước)", description = "Lưu dữ liệu 3 bước Onboarding chủ trọ: Thông tin cá nhân, Số lượng & khu vực phòng, Giấy tờ xác thực")
     public ResponseEntity<ApiResponse<Void>> landlordOnboarding(@Valid @RequestBody LandlordOnboardingRequest request) {
         authService.landlordOnboarding(request);

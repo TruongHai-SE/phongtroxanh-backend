@@ -23,11 +23,20 @@ public final class SecurityUtils {
         return getCurrentUser().getId();
     }
 
+    public static java.util.Optional<UUID> getCurrentUserIdSafely() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof UserPrincipal principal) {
+            return java.util.Optional.of(principal.getId());
+        }
+        return java.util.Optional.empty();
+    }
+
     public static boolean hasRole(String role) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null) return false;
+        if (auth == null || !auth.isAuthenticated() || role == null) return false;
+        String authority = role.startsWith("ROLE_") ? role : "ROLE_" + role;
         return auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_" + role));
+                .anyMatch(a -> a.getAuthority().equals(authority));
     }
 
     public static void assertOwnership(UUID resourceOwnerId, String errorMessage) {

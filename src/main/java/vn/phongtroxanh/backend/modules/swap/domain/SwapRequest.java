@@ -8,6 +8,7 @@ import vn.phongtroxanh.backend.common.entity.BaseEntity;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -52,6 +53,20 @@ public class SwapRequest extends BaseEntity {
 
     @Column(name = "matched_tenant_id")
     private UUID matchedTenantId;
+
+    @Column(name = "offered_room_id")
+    private UUID offeredRoomId;
+
+    @Column(name = "proposal_message", columnDefinition = "TEXT")
+    private String proposalMessage;
+
+    @Column(name = "proposal_created_at")
+    private Instant proposalCreatedAt;
+
+    @Version
+    @Column(name = "version")
+    @Builder.Default
+    private Long version = 0L;
 
     @Column(name = "landlord_id")
     private UUID landlordId;

@@ -28,6 +28,7 @@ public class UserProfileResponse {
     private UserStatus status;
     private String avatarUrl;
     private Boolean isVerified;
+    private Boolean isOnboarded;
     private Integer trustScore;
     private Instant createdAt;
     private Instant lastActiveAt;
@@ -35,13 +36,13 @@ public class UserProfileResponse {
     // Consumables info
     private Integer swipesLeft;
     private Integer boostsLeft;
-    private Integer superMatchesLeft;
 
     // Profile details
     private String schoolOrCompany;
     private LocalDate birthDate;
     private Gender gender;
     private String preferredGender;
+    private String address;
     private String bio;
     private BigDecimal budgetMin;
     private BigDecimal budgetMax;

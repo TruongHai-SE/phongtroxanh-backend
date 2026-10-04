@@ -2,9 +2,11 @@
   <a href="README.md"><b>English</b></a> | <a href="README.vi.md"><b>Tiếng Việt</b></a>
 </p>
 
-# PhongTrọXanh.vn — Backend Enterprise Service
+# PhongTrọXanh.vn — Backend Service
 
-> Production-grade **Modular Monolith** backend powering an eco-friendly rental housing and smart roommate matching marketplace in Vietnam, featuring two-way trust scoring (TrustScore), digital rental contracts, and fraud-resistant dynamic QR check-ins.
+> **Modular Monolith** backend for rental housing and roommate matching, with trust scoring, rental records and dynamic QR check-in. Rental records currently have no PDF contract generation or electronic signature provider.
+
+Current MVP verification: [core flows and limitations](docs/backend-verification.md). Payment setup: [payOS](docs/payos-setup.md). Historical VNPay integration instructions are superseded by this payOS guide.
 
 ---
 
@@ -19,8 +21,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL_16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL 16"></a>
-  <a href="https://postgis.net/"><img src="https://img.shields.io/badge/PostGIS_3.4-2D8C4E?style=for-the-badge&logo=postgis&logoColor=white" alt="PostGIS"></a>
+  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL_18-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL 18"></a>
+  <a href="https://postgis.net/"><img src="https://img.shields.io/badge/PostGIS_3.6-2D8C4E?style=for-the-badge&logo=postgis&logoColor=white" alt="PostGIS"></a>
   <a href="https://redis.io/"><img src="https://img.shields.io/badge/Redis_7-DC382D?style=for-the-badge&logo=redis&logoColor=white" alt="Redis 7"></a>
   <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/Docker_Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker Compose"></a>
   <a href="https://springdoc.org/"><img src="https://img.shields.io/badge/OpenAPI_3.0-85EA2D?style=for-the-badge&logo=openapiinitiative&logoColor=black" alt="OpenAPI"></a>
@@ -28,7 +30,7 @@
 
 <p align="center">
   <a href="https://cloudinary.com/"><img src="https://img.shields.io/badge/Cloudinary-3448C5?style=for-the-badge&logo=cloudinary&logoColor=white" alt="Cloudinary"></a>
-  <a href="https://vnpay.vn/"><img src="https://img.shields.io/badge/VNPay_Sandbox-005BAA?style=for-the-badge&logo=vnpay&logoColor=white" alt="VNPay Sandbox"></a>
+  <a href="https://payos.vn/"><img src="https://img.shields.io/badge/payOS-005BAA?style=for-the-badge&logo=payos&logoColor=white" alt="payOS"></a>
   <a href="https://www.brevo.com/"><img src="https://img.shields.io/badge/Brevo_REST_API-0B996E?style=for-the-badge&logo=brevo&logoColor=white" alt="Brevo"></a>
   <a href="https://goong.io/"><img src="https://img.shields.io/badge/Goong_Maps_API-FF5722?style=for-the-badge" alt="Goong Maps"></a>
   <a href="https://resilience4j.readme.io/"><img src="https://img.shields.io/badge/Resilience4j_2.2-FF9900?style=for-the-badge" alt="Resilience4j"></a>
@@ -42,12 +44,12 @@
 | :--- | :--- | :--- |
 | **Architecture Pattern** | **Modular Monolith** (12 Bounded Modules) | Domain logic encapsulated into independent bounded contexts inside a single deployable runtime, eliminating microservice networking overhead, serialized DTO overhead, and distributed transaction complexity at current operational scale. |
 | **Layering Strategy** | **Pragmatic Layered Architecture** | Strict 4-tier flow: `presentation` $\to$ `application` $\to$ `domain` $\to$ `infrastructure`. Domain entities leverage JPA annotations directly for Hibernate dirty-checking velocity while preserving zero-framework pure domain engines (`MatchingEngine`). |
-| **Database & GIS** | PostgreSQL 16 + PostGIS 3.4 Extension | Relational store for 25 normalized tables. Spatial coordinates use `GEOMETRY(Point, 4326)` indexed with `GIST` to execute high-throughput radius queries (`ST_DWithin`) for MapView. |
+| **Database & GIS** | PostgreSQL 18 + PostGIS 3.4 Extension | Relational store for 25 normalized tables. Spatial coordinates use `GEOMETRY(Point, 4326)` indexed with `GIST` to execute high-throughput radius queries (`ST_DWithin`) for MapView. |
 | **Cache & In-Memory Store** | Redis 7 (Alpine) | Serves 4 specialized workloads: (1) In-memory read caching (view counters, user profiles), (2) Token revocation blacklisting on logout, (3) Atomic counter operations for quota management, (4) STOMP WebSocket pub/sub message broker. |
 | **Security & Session** | Stateless JWT (JJWT 0.12.6) + HttpOnly Cookies | 15-minute `AccessToken` kept in client in-memory state to mitigate XSS; 7-day `RefreshToken` secured in `HttpOnly, Secure, SameSite=Lax` cookies; multi-device session revocation coordinated via Redis session hashes. |
 | **PII Cryptography** | AES-256-GCM (Hardware-Accelerated) | Citizen Identification Cards (CCCD/CMND) encrypted at rest in the database using authenticated AES-256-GCM with dynamic IVs. Decryption occurs strictly in-memory during KYC verification audits. |
 | **Asset Storage** | Cloudinary Cloud Storage | Zero-disk-spooling direct `InputStream` byte streaming from client to Cloudinary under structured paths (`phongtroxanh/{rooms,avatars,kyc,dispute-evidence,misc}`); 100% compliant with PaaS ephemeral filesystems (Render / Railway). |
-| **Payment Processing** | VNPay Sandbox Gateway (HMAC-SHA512) | Subscription plans (Free, Pro Tenant, Landlord VIP) and consumable transactions signed with cryptographic hashes; IPN webhooks enforce strict idempotency via PostgreSQL unique constraints. |
+| **Payment Processing** | payOS (official Java SDK, signed webhook) | Subscription plans (Free, Pro Tenant, Landlord VIP) and consumable transactions signed with cryptographic hashes; Signed webhooks lock the payment row and credit benefits once per order. |
 | **Transactional Email** | Brevo REST API v3 (HTTPS Port 443) | Outbound transactional emails (OTP, password resets) dispatched over TLS/HTTPS (Port 443), preventing connection timeouts caused by cloud platforms blocking legacy TCP SMTP ports (25, 465, 587). Local fallback to `console` logger supported. |
 | **Geocoding & Spatial** | Goong Maps REST API | Fallback geocoding resolving Vietnamese natural language addresses into PostGIS coordinates when landlords post rooms without GPS coordinates; Redis-cached place autocomplete. |
 | **Real-time Messaging** | STOMP over WebSocket (`/ws/chat`) | Full-duplex real-time chat with channel-level JWT interceptors, backed by Redis Pub/Sub for cross-connection event dispatching and PostgreSQL persistence for message history. |
@@ -87,21 +89,21 @@ flowchart TB
         subgraph CommonPorts["Common Ports & Adapters (common.*)"]
             StoragePort["FileStoragePort<br/>(CloudinaryStorageAdapter)"]
             MailPort["EmailNotificationPort<br/>(BrevoEmailAdapter)"]
-            PaymentPort["PaymentGatewayPort<br/>(VnPayPaymentAdapter)"]
+            PaymentPort["PayOsPaymentAdapter<br/>(official payOS SDK)"]
             GeoPort["GeocodingPort<br/>(GoongMapsAdapter)"]
             CryptoUtil["CryptoUtils (AES-256-GCM)"]
         end
     end
 
     subgraph DataInfrastructure["Data & Persistence"]
-        PostgresDB[("PostgreSQL 16 + PostGIS<br/>(25 Tables, GIST Spatial Index)")]
+        PostgresDB[("PostgreSQL 18 + PostGIS<br/>(25 Tables, GIST Spatial Index)")]
         RedisCache[("Redis 7<br/>(Sessions, Token Blacklist, Pub/Sub)")]
     end
 
     subgraph ExternalAPIs["Third-Party Integrations"]
         CloudinaryAPI["Cloudinary Storage API"]
         BrevoAPI["Brevo Email REST API"]
-        VNPayAPI["VNPay Sandbox Payment API"]
+        PayOSAPI["payOS Payment API"]
         GoongAPI["Goong Maps Geocoding API"]
     end
 
@@ -114,7 +116,7 @@ flowchart TB
 
     StoragePort --> CloudinaryAPI
     MailPort --> BrevoAPI
-    PaymentPort --> VNPayAPI
+    PaymentPort --> PayOSAPI
     GeoPort --> GoongAPI
 ```
 
@@ -146,7 +148,7 @@ $$\text{CompatibilityScore} = \sum_{i=1}^{8} (W_i \times S_i) \quad \in [0, 100]
   WHERE user_id = :userId AND swipes_left > 0;
   ```
   If affected rows equal `0`, the service instantly raises `AppException(CONSUMABLE_EXHAUSTED)`.
-* **Idempotent Payment Webhook Handling:** Payment gateways frequently replay IPN notifications during network hiccups. The system enforces a `UNIQUE (idempotency_key)` database constraint on payment transactions, guaranteeing that duplicate webhook deliveries are rejected without double-crediting balances.
+* **Idempotent Payment Webhook Handling:** payOS may replay signed notifications. The handler locks each order and only grants benefits while it is PENDING; a replay of SUCCESS is acknowledged without granting benefits again. An optional Idempotency-Key prevents duplicate checkout orders.
 * **Room State Isolation:** Entity `Room` implements optimistic locking via `@Version` to resolve simultaneous booking or updating attempts.
 
 ### 3.3. Fraud-Resistant Dynamic QR Check-In
@@ -173,7 +175,7 @@ d:\EXE\backend\src\main\java\vn\phongtroxanh\backend
 │   ├── exception/                      # AppException, ErrorCode, GlobalExceptionHandler
 │   ├── location/                       # GeocodingPort, GoongMapsAdapter
 │   ├── mail/                           # EmailNotificationPort, BrevoEmailAdapter
-│   ├── payment/                        # PaymentGatewayPort, VnPayPaymentAdapter
+│   ├── payment/                        # PayOsPaymentAdapter (official SDK)
 │   ├── repository/                     # Base persistence interfaces
 │   ├── security/                       # JwtTokenProvider, JwtAuthFilter, UserPrincipal
 │   ├── storage/                        # FileStoragePort, CloudinaryStorageAdapter
@@ -185,7 +187,7 @@ d:\EXE\backend\src\main\java\vn\phongtroxanh\backend
     ├── location/                       # Vietnamese Address Autocomplete, Geocoding & Reverse Geocoding
     ├── matching/                       # Discovery Feed, Swipe Interactions, Mutual Match Detection
     ├── misc/                           # Public Landing Statistics
-    ├── monetization/                   # Subscription Plans, VNPay Sandbox Checkout, IPN Consumer
+    ├── monetization/                   # Subscription Plans, payOS Checkout, Signed Webhook
     ├── notification/                   # In-App Notifications, FCM Token Registry
     ├── rental/                         # Contracts, Dynamic Check-in QR Token, Replay Protection
     ├── review/                         # Two-Way Reviews, Evidence Uploads, Dispute Management
@@ -206,7 +208,7 @@ d:\EXE\backend\src\main\java\vn\phongtroxanh\backend
 | **Rentals & QR** | `/api/v1/rentals` | **7** | Rental requests, Electronic contracts, Dynamic single-use check-in QR generation, Physical check-in validation. |
 | **Reviews & Disputes** | `/api/v1/reviews` | **8** | Two-way rental evaluations, Dispute evidence attachment, Public responses, Dispute claims. |
 | **Real-time Chat** | `/api/v1/chat` + WS | **5 + 1 WS** | Conversation registry, Historical message retrieval, REST dispatch & STOMP messaging via `/ws/chat`. |
-| **Monetization** | `/api/v1/monetization` | **7** | Tiered plan catalogue, VNPay payment URL generation, Asynchronous IPN webhook handling, Transaction logs. |
+| **Monetization** | `/api/v1/monetization` | **7** | Tiered plan catalogue, payOS checkout URL generation, signed webhook handling, Transaction logs. |
 | **Admin Control** | `/api/v1/admin` | **12** | Executive KPI dashboard, KYC CCCD decryption audit, User moderation, Room verification, Dispute resolution. |
 | **Location Services** | `/api/v1/locations` | **3** | Vietnamese address autocomplete (24h Redis cache), Forward & Reverse Geocoding. |
 | **Public Statistics** | `/api/v1/misc` | **1** | Public landing page metrics (active rooms, successful matches, satisfaction index). |
@@ -225,7 +227,7 @@ The persistence model consists of **25 relational tables**, all utilizing `UUID 
 * **Billing & Monetization:** `subscription_plans`, `user_subscriptions`, `user_consumables`, `payment_transactions`.
 * **Communication:** `chat_conversations`, `chat_messages`, `notifications`.
 
-The production schema, GiST/B-tree indexes, and automated timestamp triggers are maintained in [`docs/DATABASE_SCHEMA.sql`](./docs/DATABASE_SCHEMA.sql).
+The initial schema, GiST/B-tree indexes, and automated timestamp triggers are maintained in [`db/bootstrap/schema.sql`](./db/bootstrap/schema.sql).
 
 ---
 
@@ -269,9 +271,10 @@ REDIS_PORT=6379
 # JWT HS512 Secret (Minimum 64 characters)
 JWT_SECRET=4c6f6e675f616e645f73757065725f7365637265745f6a77745f6b65795f666f725f70686f6e6774726f78616e685f766e5f68733531325f73656375726974795f746f6b656e
 
-# VNPay Sandbox Gateway
-VNPAY_TMN_CODE=TESTVNPAY
-VNPAY_HASH_SECRET=TESTHASHSECRET1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF
+# payOS Gateway
+PAYOS_CLIENT_ID=
+PAYOS_API_KEY=
+PAYOS_CHECKSUM_KEY=
 
 # Email (Select 'console' for local testing or 'brevo' with BREVO_API_KEY)
 MAIL_PROVIDER=console
@@ -314,35 +317,38 @@ The application server listens at: `http://localhost:8080`
 
 ---
 
-## 7. Quality Assurance & Automated Testing
+## 7. Testing
 
-The repository provides 3 independent levels of automated verification:
+Use JDK 21 with PostgreSQL and Redis running. SQL integration tests require an isolated `ptx_mvp_check` database initialized with the schema and migration.
 
-1. **Unit & Integration Test Suite (JUnit 5 + Mockito):**
-   * Command: `.\mvnw.cmd test`
-   * Validates Spring Boot context initialization, `AesGcmEncryptionConverter` cryptographic rounds, and `MatchingEngine` compatibility math.
-2. **Fast Live E2E Smoke Test ([`scripts/e2e_smoke_test.py`](./scripts/e2e_smoke_test.py)):**
-   * Validates 14 sequential core user journeys: Registration $\to$ Login $\to$ Property Creation $\to$ PostGIS Radius Query $\to$ Contract Execution $\to$ QR Check-in $\to$ Review Posting $\to$ Monetization.
-   * Zero external dependencies (uses standard Python 3 `urllib`):
-     ```bash
-     python scripts/e2e_smoke_test.py
-     ```
-3. **Comprehensive API Matrix Test Runner ([`scripts/test_full_api_matrix.py`](./scripts/test_full_api_matrix.py)):**
-   * Executes **184 test cases across all 105 API endpoints**, auditing Happy Paths, RBAC violations (403), BOLA authorization violations (403), and Input Validation boundaries (400).
-   * Verified with **Zero 500 Internal Server Errors** (see [`docs/TEST_REPORT.md`](./docs/TEST_REPORT.md)).
-4. **Unhappy & Security Defenses Test ([`scripts/test_unhappy_paths.py`](./scripts/test_unhappy_paths.py)):**
-   * Penetration testing for malicious tokens, cross-tenant IDOR/BOLA tampering, invalid request formats, and OTP spam abuse.
+```powershell
+$env:JAVA_HOME='C:\Program Files\Java\jdk-21'
+$env:PTX_TEST_DB_URL='jdbc:postgresql://localhost:5433/ptx_mvp_check?stringtype=unspecified'
+mvn clean test
+```
+
+[`scripts/check_core_flows.py`](scripts/check_core_flows.py) checks HTTP/WebSocket flows against the test backend at localhost:18080:
+
+```powershell
+python scripts/check_core_flows.py --fixture-db ptx_mvp_check
+```
+
+The script uses Python's standard library and Node.js 24 for `check_chat_websocket.cjs`. It checks statuses, payloads and resulting state, and exits nonzero on failure. Run the test backend with empty payOS credentials to check the missing-configuration case. Fixture execution is restricted to the isolated test database.
+
+Verified results: **108 tests + 73 HTTP/WebSocket checks**. See the [MVP verification report](docs/backend-verification.md) and [payOS setup](docs/payos-setup.md).
 
 ---
 
 ## 8. Technical Documentation Index
 
-All engineering specifications and architectural standards reside in [`docs/`](./docs/):
+Engineering specifications reside in [`docs/`](./docs/):
 
-* [`SYSTEM_SPECIFICATION.md`](./docs/SYSTEM_SPECIFICATION.md): Comprehensive functional requirements and endpoint catalog.
-* [`CODING_RULES.md`](./docs/CODING_RULES.md): 26 chapters covering architecture rules, naming standards, and Definition of Done.
-* [`ARCHITECTURE_DECISIONS.md`](./docs/ARCHITECTURE_DECISIONS.md): 11 Architecture Decision Records (ADR-001 through ADR-011).
-* [`DATABASE_SCHEMA.sql`](./docs/DATABASE_SCHEMA.sql): DDL creating all 25 relational tables, PostGIS extensions, indexes, and triggers.
-* [`THIRD_PARTY_INTEGRATION_GUIDE.md`](./docs/THIRD_PARTY_INTEGRATION_GUIDE.md): Setup guide for Cloudinary, Brevo, Goong Maps, and VNPay Sandbox.
-* [`TEST_REPORT.md`](./docs/TEST_REPORT.md): Quantitative verification report across the 105-endpoint matrix.
-* [`CODEBASE_OVERVIEW.md`](./docs/CODEBASE_OVERVIEW.md): In-depth system architecture guide for incoming engineers.
+* [`system-specification.md`](./docs/system-specification.md): Comprehensive functional requirements and endpoint catalog.
+* [`coding-rules.md`](./docs/coding-rules.md): 26 chapters covering architecture rules, naming standards, and Definition of Done.
+* [`architecture-decisions.md`](./docs/architecture-decisions.md): 11 Architecture Decision Records (ADR-001 through ADR-011).
+* [`schema.sql`](./db/bootstrap/schema.sql): DDL creating all 25 relational tables, PostGIS extensions, indexes, and triggers.
+* [`third-party-integrations.md`](./docs/third-party-integrations.md): Setup guide for Cloudinary, Brevo, Goong Maps, and payOS.
+* [`backend-verification.md`](docs/backend-verification.md): Verified flows, test evidence and MVP limitations.
+* [`codebase-overview.md`](./docs/codebase-overview.md): In-depth system architecture guide for incoming engineers.
+
+Database layout and upgrade procedure: [db/README.md](db/README.md). Executable SQL is stored separately from documentation.

@@ -40,16 +40,17 @@ public class UserProfile implements Serializable {
     @Builder.Default
     private String preferredGender = "ANY";
 
+    @Column(name = "address", length = 255)
+    private String address;
+
     @Column(name = "bio", columnDefinition = "TEXT")
     private String bio;
 
     @Column(name = "budget_min", precision = 12, scale = 2)
-    @Builder.Default
-    private BigDecimal budgetMin = new BigDecimal("1000000");
+    private BigDecimal budgetMin;
 
     @Column(name = "budget_max", precision = 12, scale = 2)
-    @Builder.Default
-    private BigDecimal budgetMax = new BigDecimal("4000000");
+    private BigDecimal budgetMax;
 
     @JdbcTypeCode(SqlTypes.ARRAY)
     @Column(name = "preferred_districts", columnDefinition = "varchar(100)[]")
@@ -60,59 +61,46 @@ public class UserProfile implements Serializable {
     private String sleepSchedule;
 
     @Column(name = "cleanliness_level")
-    @Builder.Default
-    private Integer cleanlinessLevel = 4;
+    private Integer cleanlinessLevel;
 
     @Column(name = "guest_frequency", length = 50)
     private String guestFrequency;
 
     @Column(name = "smoking_tolerance")
-    @Builder.Default
-    private Boolean smokingTolerance = false;
+    private Boolean smokingTolerance;
 
     @Column(name = "pet_tolerance", length = 50)
-    @Builder.Default
-    private String petTolerance = "NONE";
+    private String petTolerance;
 
     @Column(name = "noise_tolerance")
-    @Builder.Default
-    private Integer noiseTolerance = 40;
+    private Integer noiseTolerance;
 
     @Column(name = "allow_guests")
-    @Builder.Default
-    private Boolean allowGuests = false;
+    private Boolean allowGuests;
 
     @Column(name = "early_sleeper")
-    @Builder.Default
-    private Boolean earlySleeper = true;
+    private Boolean earlySleeper;
 
     @Column(name = "is_neat")
-    @Builder.Default
-    private Boolean isNeat = true;
+    private Boolean isNeat;
 
     @Column(name = "non_smoking")
-    @Builder.Default
-    private Boolean nonSmoking = true;
+    private Boolean nonSmoking;
 
     @Column(name = "preferred_room_type", length = 50)
-    @Builder.Default
-    private String preferredRoomType = "PHONG_KHEP_KIN";
+    private String preferredRoomType;
 
     @Column(name = "proximity_school")
-    @Builder.Default
-    private Boolean proximitySchool = true;
+    private Boolean proximitySchool;
 
     @Column(name = "proximity_work")
-    @Builder.Default
-    private Boolean proximityWork = true;
+    private Boolean proximityWork;
 
     @Column(name = "proximity_market")
-    @Builder.Default
-    private Boolean proximityMarket = true;
+    private Boolean proximityMarket;
 
     @Column(name = "proximity_bus")
-    @Builder.Default
-    private Boolean proximityBus = true;
+    private Boolean proximityBus;
 
     @JdbcTypeCode(SqlTypes.ARRAY)
     @Column(name = "interests", columnDefinition = "varchar(50)[]")

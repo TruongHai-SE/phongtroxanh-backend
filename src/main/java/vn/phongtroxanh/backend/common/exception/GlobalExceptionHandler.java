@@ -1,12 +1,21 @@
 package vn.phongtroxanh.backend.common.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.persistence.OptimisticLockException;
+import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.beans.TypeMismatchException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
+import org.springframework.validation.BindException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -23,6 +32,18 @@ import java.util.UUID;
 public class GlobalExceptionHandler {
 
     private static final String BASE_ERROR_URI = "https://api.phongtroxanh.vn/errors/";
+
+    @ExceptionHandler({HttpMessageNotReadableException.class, TypeMismatchException.class,
+            MissingServletRequestParameterException.class, MissingServletRequestPartException.class,
+            ConstraintViolationException.class, BindException.class})
+    public ResponseEntity<ProblemDetailResponse> handleInvalidInput(Exception ex, HttpServletRequest request) {
+        return handleAppException(new BadRequestException("INVALID_INPUT_DATA", "Dữ liệu gửi lên không hợp lệ"), request);
+    }
+
+    @ExceptionHandler({DataIntegrityViolationException.class, OptimisticLockingFailureException.class, OptimisticLockException.class})
+    public ResponseEntity<ProblemDetailResponse> handleDataConflict(Exception ex, HttpServletRequest request) {
+        return handleAppException(new ConflictException("DATA_CONFLICT", "Dữ liệu bị trùng hoặc đã được cập nhật. Vui lòng tải lại và thử lại"), request);
+    }
 
     @ExceptionHandler(AppException.class)
     public ResponseEntity<ProblemDetailResponse> handleAppException(AppException ex, HttpServletRequest request) {

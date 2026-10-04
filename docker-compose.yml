@@ -1,9 +1,6 @@
 services:
   postgres:
-    build:
-      context: ./docker/postgres
-      dockerfile: Dockerfile
-    image: phongtroxanh-postgres:16-postgis
+    image: postgis/postgis:18-3.6-alpine
     container_name: phongtroxanh-postgres
     restart: always
     environment:
@@ -14,7 +11,6 @@ services:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./docs/DATABASE_SCHEMA.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d phongtroxanh_db"]
       interval: 5s
@@ -22,12 +18,10 @@ services:
       retries: 5
 
   redis:
-    build:
-      context: ./docker/redis
-      dockerfile: Dockerfile
-    image: phongtroxanh-redis:7
+    image: redis:7-alpine
     container_name: phongtroxanh-redis
     restart: always
+    command: ["redis-server", "--protected-mode", "no", "--appendonly", "yes", "--dir", "/data"]
     ports:
       - "6379:6379"
     volumes:

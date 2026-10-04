@@ -5,6 +5,8 @@ import lombok.*;
 
 import java.io.Serializable;
 import java.time.LocalDate;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.UUID;
 
 @Entity
@@ -24,17 +26,20 @@ public class UserConsumable implements Serializable {
     @Builder.Default
     private Integer swipesLeft = 15;
 
+    @Column(name = "free_swipes_left", nullable = false)
+    @Builder.Default
+    private Integer freeSwipesLeft = 15;
+
     @Column(name = "boosts_left")
     @Builder.Default
     private Integer boostsLeft = 0;
 
-    @Column(name = "super_matches_left")
-    @Builder.Default
-    private Integer superMatchesLeft = 0;
+    @Column(name = "profile_boost_expires_at")
+    private Instant profileBoostExpiresAt;
 
     @Column(name = "last_swipe_reset_at")
     @Builder.Default
-    private LocalDate lastSwipeResetAt = LocalDate.now();
+    private LocalDate lastSwipeResetAt = LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh"));
 
     @Version
     @Column(name = "version")
