@@ -7,6 +7,9 @@ import vn.phongtroxanh.backend.common.entity.BaseEntity;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.Map;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "payment_transactions")
@@ -52,6 +55,22 @@ public class PaymentTransaction extends BaseEntity {
     @Column(name = "qr_expired_at")
     private Instant qrExpiredAt;
 
+    @Column(name = "payment_url", length = 1000)
+    private String paymentUrl;
+
+    @Column(name = "payment_link_id", length = 100)
+    private String paymentLinkId;
+
+    @Column(name = "gateway_reference", length = 150)
+    private String gatewayReference;
+
+    @Column(name = "return_url", length = 1000)
+    private String returnUrl;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "benefits", columnDefinition = "jsonb")
+    private Map<String, Integer> benefits;
+
     @Transient
     private String packageId;
 
@@ -84,6 +103,9 @@ public class PaymentTransaction extends BaseEntity {
     public String getPackageId() {
         return packageId != null ? packageId : itemName;
     }
+
+    public String getVnpTransactionNo() { return gatewayReference; }
+    public void setVnpTransactionNo(String reference) { this.gatewayReference = reference; }
 
     public void setPackageId(String packageId) {
         this.packageId = packageId;
