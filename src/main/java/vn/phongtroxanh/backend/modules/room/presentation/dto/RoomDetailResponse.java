@@ -35,9 +35,11 @@ public class RoomDetailResponse {
     private Long viewCount;
     private Instant createdAt;
     private Instant updatedAt;
+    private Instant expiresAt;
 
     private List<RoomImageDTO> images;
     private List<RoomFeeDTO> fees;
+    private List<String> amenities;
     private LandlordSummaryDTO landlord;
     private Boolean isSaved;
 

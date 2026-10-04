@@ -5,6 +5,7 @@ import vn.phongtroxanh.backend.modules.room.domain.RoomStatus;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Getter
@@ -33,5 +34,7 @@ public class RoomSummaryResponse {
     private Boolean isBoosted;
     private Long viewCount;
     private String primaryImageUrl;
+    private List<String> amenities;
     private Instant createdAt;
+    private Instant expiresAt;
 }

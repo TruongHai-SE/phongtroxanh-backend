@@ -24,13 +24,18 @@ public interface RoomRepository extends JpaRepository<Room, UUID>, JpaSpecificat
     @Query(value = """
         SELECT r.* FROM rooms r
         WHERE r.status = 'AVAILABLE'
+          AND r.expires_at > CURRENT_TIMESTAMP
+          AND EXISTS (SELECT 1 FROM users u WHERE u.id = r.landlord_id AND u.status NOT IN ('LOCKED', 'DELETED'))
+          AND (CAST(:excludeUserId AS UUID) IS NULL OR NOT EXISTS (
+              SELECT 1 FROM room_swipes rs WHERE rs.room_id = r.id AND rs.user_id = CAST(:excludeUserId AS UUID)
+          ))
           AND (CAST(:district AS TEXT) IS NULL OR r.district = CAST(:district AS TEXT))
           AND (CAST(:roomType AS TEXT) IS NULL OR r.room_type = CAST(:roomType AS TEXT))
           AND (CAST(:minPrice AS NUMERIC) IS NULL OR r.price >= CAST(:minPrice AS NUMERIC))
           AND (CAST(:maxPrice AS NUMERIC) IS NULL OR r.price <= CAST(:maxPrice AS NUMERIC))
           AND (CAST(:keyword AS TEXT) IS NULL OR LOWER(r.title) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%')) OR LOWER(r.address_street) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%')))
         ORDER BY
-          CASE WHEN CAST(:sortBy AS TEXT) = 'boost_first' THEN r.is_boosted END DESC,
+          CASE WHEN CAST(:sortBy AS TEXT) = 'boost_first' AND r.is_boosted = TRUE AND r.boost_expires_at > CURRENT_TIMESTAMP THEN r.boost_expires_at END DESC NULLS LAST,
           CASE WHEN CAST(:sortBy AS TEXT) = 'price_asc' THEN r.price END ASC,
           CASE WHEN CAST(:sortBy AS TEXT) = 'price_desc' THEN r.price END DESC,
           r.created_at DESC
@@ -38,6 +43,11 @@ public interface RoomRepository extends JpaRepository<Room, UUID>, JpaSpecificat
         countQuery = """
         SELECT count(*) FROM rooms r
         WHERE r.status = 'AVAILABLE'
+          AND r.expires_at > CURRENT_TIMESTAMP
+          AND EXISTS (SELECT 1 FROM users u WHERE u.id = r.landlord_id AND u.status NOT IN ('LOCKED', 'DELETED'))
+          AND (CAST(:excludeUserId AS UUID) IS NULL OR NOT EXISTS (
+              SELECT 1 FROM room_swipes rs WHERE rs.room_id = r.id AND rs.user_id = CAST(:excludeUserId AS UUID)
+          ))
           AND (CAST(:district AS TEXT) IS NULL OR r.district = CAST(:district AS TEXT))
           AND (CAST(:roomType AS TEXT) IS NULL OR r.room_type = CAST(:roomType AS TEXT))
           AND (CAST(:minPrice AS NUMERIC) IS NULL OR r.price >= CAST(:minPrice AS NUMERIC))
@@ -52,11 +62,14 @@ public interface RoomRepository extends JpaRepository<Room, UUID>, JpaSpecificat
             @Param("maxPrice") BigDecimal maxPrice,
             @Param("keyword") String keyword,
             @Param("sortBy") String sortBy,
+            @Param("excludeUserId") UUID excludeUserId,
             Pageable pageable);
 
     @Query(value = """
         SELECT r.* FROM rooms r
         WHERE r.status = 'AVAILABLE'
+          AND r.expires_at > CURRENT_TIMESTAMP
+          AND EXISTS (SELECT 1 FROM users u WHERE u.id = r.landlord_id AND u.status NOT IN ('LOCKED', 'DELETED'))
           AND ST_DWithin(r.location::geography, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography, :radiusMeters)
           AND (CAST(:minPrice AS NUMERIC) IS NULL OR r.price >= CAST(:minPrice AS NUMERIC))
           AND (CAST(:maxPrice AS NUMERIC) IS NULL OR r.price <= CAST(:maxPrice AS NUMERIC))

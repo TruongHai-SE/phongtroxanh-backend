@@ -8,6 +8,8 @@ import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.PrecisionModel;
 import vn.phongtroxanh.backend.common.entity.BaseEntity;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -114,6 +116,11 @@ public class Room extends BaseEntity {
     @OneToMany(mappedBy = "room", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @Builder.Default
     private List<RoomFee> fees = new ArrayList<>();
+
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "amenities", columnDefinition = "varchar(100)[]")
+    @Builder.Default
+    private List<String> amenities = new ArrayList<>();
 
     @PrePersist
     @PreUpdate
