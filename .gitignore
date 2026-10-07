@@ -115,3 +115,9 @@ temp/
 scratch/
 repomix-output.*
 *packed*.md
+
+# ==============================================================================
+# LOCAL SEED & MOCK SCRIPTS (LOCAL USE ONLY)
+# ==============================================================================
+src/main/resources/db/seed_mock_data.sql
+src/main/resources/db/seed*.sql
