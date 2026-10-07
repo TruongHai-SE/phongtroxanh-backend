@@ -492,6 +492,7 @@ public class AuthService {
         if (request.getProximityWork() != null) profile.setProximityWork(request.getProximityWork());
         if (request.getProximityMarket() != null) profile.setProximityMarket(request.getProximityMarket());
         if (request.getProximityBus() != null) profile.setProximityBus(request.getProximityBus());
+        if (request.getIsPublic() != null) profile.setIsPublic(request.getIsPublic());
 
         if ((profile.getBudgetMin() != null && profile.getBudgetMin().signum() < 0)
                 || (profile.getBudgetMax() != null && profile.getBudgetMax().signum() < 0)
