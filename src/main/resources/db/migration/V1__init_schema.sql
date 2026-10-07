@@ -217,7 +217,7 @@ CREATE TABLE IF NOT EXISTS swap_requests (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 14. BẢNG HỢP ĐỒNG THUÊ & CHECK-IN QR (rental_contracts)
+-- 14. BẢNG HỢP ĐỒNG THUÊ & XÁC NHẬN NHẬN PHÒNG (rental_contracts)
 CREATE TABLE IF NOT EXISTS rental_contracts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     room_id UUID NOT NULL REFERENCES rooms(id) ON DELETE RESTRICT,
