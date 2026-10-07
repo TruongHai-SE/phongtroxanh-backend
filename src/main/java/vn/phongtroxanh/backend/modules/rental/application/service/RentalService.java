@@ -185,18 +185,18 @@ public class RentalService {
 
         // Only landlord or admin can verify check-in
         if (!rental.getLandlordId().equals(currentUserId) && !SecurityUtils.hasRole("ROLE_ADMIN")) {
-            throw new ForbiddenException("BOLA_FORBIDDEN", "Chỉ chủ trọ mới có quyền quét mã Check-in xác nhận nhận phòng");
+            throw new ForbiddenException("BOLA_FORBIDDEN", "Chỉ chủ trọ mới có quyền xác nhận bàn giao nhận phòng");
         }
 
         String inputCode = request.getCheckInCode() != null ? request.getCheckInCode().trim().toUpperCase() : "";
         if (inputCode.isEmpty()) {
-            throw new BadRequestException("INVALID_CHECKIN_CODE", "Mã Check-in không được để trống");
+            throw new BadRequestException("INVALID_CHECKIN_CODE", "Mã xác nhận Check-in không được để trống");
         }
 
         String redisKey = "rental:checkin:" + rentalId;
         String redisManualKey = "rental:checkin:manual:" + rentalId;
 
-        // Support both direct 1-click confirmation ("CONFIRM", "HANDOVER") and dynamic QR code matching
+        // Support both direct 1-click confirmation ("CONFIRM", "HANDOVER") and dynamic code matching
         boolean isDirectHandover = inputCode.equals("CONFIRM") || inputCode.equals("HANDOVER");
         if (!isDirectHandover) {
             Object cachedCode = redisTemplate.opsForValue().get(redisKey);
@@ -206,7 +206,7 @@ public class RentalService {
             boolean matchesManual = cachedManualCode != null && cachedManualCode.toString().equalsIgnoreCase(inputCode);
 
             if (!matchesQr && !matchesManual) {
-                throw new BadRequestException("INVALID_QR_CODE", "Mã Check-in không hợp lệ hoặc đã hết hạn 5 phút");
+                throw new BadRequestException("INVALID_QR_CODE", "Mã xác nhận Check-in không hợp lệ");
             }
         }
 
@@ -220,7 +220,7 @@ public class RentalService {
         requireActiveUser(rental.getTenantId());
         requireActiveUser(rental.getLandlordId());
 
-        // Invalidate QR code immediately on Redis and mark used in DB to prevent replay
+        // Invalidate temporary code on Redis and mark used in DB
         redisTemplate.delete(redisKey);
         redisTemplate.delete(redisManualKey);
         rental.setCheckInCode(null);
@@ -235,8 +235,8 @@ public class RentalService {
         roomRepository.save(room);
 
         // TrustScore Bonus (+10 points for check-in)
-        updateTrustScoreBonus(rental.getTenantId(), 10, "Nhận phòng thành công qua mã QR Check-in");
-        updateTrustScoreBonus(rental.getLandlordId(), 10, "Bàn giao phòng thành công qua mã QR Check-in");
+        updateTrustScoreBonus(rental.getTenantId(), 10, "Nhận phòng thành công");
+        updateTrustScoreBonus(rental.getLandlordId(), 10, "Bàn giao phòng thành công");
         notificationService.create(rental.getTenantId(), "Nhận phòng thành công", "Chủ trọ đã xác nhận bàn giao phòng",
                 NotificationType.SYSTEM, Map.of("rentalId", rentalId));
 

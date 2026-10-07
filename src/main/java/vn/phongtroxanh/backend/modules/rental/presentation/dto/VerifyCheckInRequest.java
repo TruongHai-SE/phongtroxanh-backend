@@ -10,6 +10,6 @@ import lombok.*;
 @AllArgsConstructor
 public class VerifyCheckInRequest {
 
-    @NotBlank(message = "Mã QR Check-in không được để trống")
+    @NotBlank(message = "Mã xác nhận Check-in không được để trống")
     private String checkInCode;
 }

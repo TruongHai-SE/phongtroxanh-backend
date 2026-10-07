@@ -9,7 +9,7 @@
 ## 1. TỔNG QUAN DỰ ÁN & CÔNG NGHỆ (TECH STACK)
 
 ### 1.1. Sứ mệnh hệ thống
-**PhongTroXanh.vn** là nền tảng tìm kiếm phòng trọ thông minh kết hợp mạng xã hội ghép đôi bạn cùng phòng (Smart Roommate Matching) đầu tiên tại Việt Nam áp dụng mô hình đánh giá tín nhiệm 2 chiều (Two-Way TrustScore) và quy trình nhận phòng an toàn chống gian lận qua Dynamic Check-in QR Code.
+**PhongTroXanh.vn** là nền tảng tìm kiếm phòng trọ thông minh kết hợp mạng xã hội ghép đôi bạn cùng phòng (Smart Roommate Matching) đầu tiên tại Việt Nam áp dụng mô hình đánh giá tín nhiệm 2 chiều (Two-Way TrustScore) và quy trình nhận phòng an toàn chống gian lận qua xác nhận bàn giao nhận phòng thực tế.
 
 ### 1.2. Công nghệ cốt lõi
 | Thành phần | Công nghệ / Thư viện | Phiên bản | Mục đích sử dụng |

@@ -18,7 +18,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/rentals")
 @RequiredArgsConstructor
-@Tag(name = "Module 6: Rentals, Check-in QR & Deposits", description = "Các API đăng ký thuê, quản lý hợp đồng thuê, mã QR Check-in nhận phòng và kết thúc hợp đồng")
+@Tag(name = "Module 6: Rentals & Deposits", description = "Các API đăng ký thuê, quản lý hợp đồng thuê, xác nhận bàn giao nhận phòng và kết thúc hợp đồng")
 public class RentalController {
 
     private final RentalService rentalService;
@@ -56,15 +56,15 @@ public class RentalController {
     }
 
     @GetMapping("/{id}/check-in-qr")
-    @Operation(summary = "API #57: Tạo mã QR Check-in nhận phòng", description = "Tạo mã QR Check-in động có chữ ký (hiệu lực 5 phút, dùng một lần chống Replay Attack)")
+    @Operation(summary = "API #57: Tạo mã xác nhận Check-in nhận phòng", description = "Tạo mã xác nhận Check-in động (hiệu lực 5 phút, dùng một lần)")
     public ResponseEntity<ApiResponse<CheckInQrResponse>> getCheckInQr(@PathVariable("id") UUID id) {
         CheckInQrResponse response = rentalService.generateCheckInQr(id);
-        return ResponseEntity.ok(ApiResponse.ok("Tạo mã QR Check-in thành công", response));
+        return ResponseEntity.ok(ApiResponse.ok("Tạo mã xác nhận Check-in thành công", response));
     }
 
     @PostMapping("/{id}/check-in")
     @PreAuthorize("hasRole('LANDLORD') or hasRole('ADMIN')")
-    @Operation(summary = "API #58: Quét xác nhận Check-in nhận phòng", description = "Chủ trọ quét mã QR của người thuê để kích hoạt hợp đồng (ACTIVE), chuyển phòng sang RENTED và cộng điểm TrustScore")
+    @Operation(summary = "API #58: Xác nhận Check-in bàn giao phòng", description = "Chủ trọ xác nhận bàn giao phòng cho người thuê để kích hoạt hợp đồng (CHECKED_IN), chuyển phòng sang RENTED và cộng điểm TrustScore")
     public ResponseEntity<ApiResponse<RentalResponse>> verifyCheckIn(
             @PathVariable("id") UUID id,
             @Valid @RequestBody VerifyCheckInRequest request) {

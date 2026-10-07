@@ -4,7 +4,7 @@
 
 # PhongTrọXanh.vn — Backend Service
 
-> **Modular Monolith** backend for rental housing and roommate matching, with trust scoring, rental records and dynamic QR check-in. Rental records currently have no PDF contract generation or electronic signature provider.
+> **Modular Monolith** backend for rental housing and roommate matching, with trust scoring, rental records and verified lease handover check-in. Rental records currently have no PDF contract generation or electronic signature provider.
 
 Current MVP verification: [core flows and limitations](docs/backend-verification.md). Payment setup: [payOS](docs/payos-setup.md). Historical VNPay integration instructions are superseded by this payOS guide.
 
@@ -151,12 +151,12 @@ $$\text{CompatibilityScore} = \sum_{i=1}^{8} (W_i \times S_i) \quad \in [0, 100]
 * **Idempotent Payment Webhook Handling:** payOS may replay signed notifications. The handler locks each order and only grants benefits while it is PENDING; a replay of SUCCESS is acknowledged without granting benefits again. An optional Idempotency-Key prevents duplicate checkout orders.
 * **Room State Isolation:** Entity `Room` implements optimistic locking via `@Version` to resolve simultaneous booking or updating attempts.
 
-### 3.3. Fraud-Resistant Dynamic QR Check-In
+### 3.3. Fraud-Resistant Verified Lease Handover Check-In
 The check-in protocol eliminates ghost listings and fraudulent deposit claims:
-1. Upon physical arrival at the rental property, the landlord triggers check-in generation.
-2. The backend generates a **Single-Use Cryptographic Check-in Token** with a 5-minute TTL, stored in Redis.
-3. The tenant scans the QR code via camera $\to$ submits to `POST /api/v1/rentals/{id}/check-in`.
-4. The system validates the tenant's real-time GPS coordinates against the property's PostGIS spatial point (must be within 500 meters), verifies token validity, transitions the contract to `CHECKED_IN`, credits **+10 TrustScore** to both parties, and immediately evicts the token to prevent replay attacks.
+1. Upon physical arrival at the rental property, the landlord and tenant proceed with room handover.
+2. The check-in verification supports both direct 1-click confirmation ("CONFIRM" / "HANDOVER") and dynamic short-lived OTP tokens stored in Redis (TTL: 5 minutes).
+3. The landlord or tenant confirms check-in via `POST /api/v1/rentals/{id}/check-in`.
+4. The system validates the check-in request, transitions the rental contract to `CHECKED_IN`, sets room status to `RENTED`, and credits **+10 TrustScore** to both parties.
 
 ### 3.4. PII Protection (AES-256-GCM)
 * Citizen identification numbers (`id_card_number`) in `user_verifications` are stored encrypted with **AES-256-GCM** using authenticated additional data (AAD) and non-repeating initialization vectors (IV).
@@ -189,7 +189,7 @@ d:\EXE\backend\src\main\java\vn\phongtroxanh\backend
     ├── misc/                           # Public Landing Statistics
     ├── monetization/                   # Subscription Plans, payOS Checkout, Signed Webhook
     ├── notification/                   # In-App Notifications, FCM Token Registry
-    ├── rental/                         # Contracts, Dynamic Check-in QR Token, Replay Protection
+    ├── rental/                         # Contracts, 1-Click Handover Verification & Room Status Management
     ├── review/                         # Two-Way Reviews, Evidence Uploads, Dispute Management
     ├── room/                           # Room CRUD, PostGIS Radius Search (ST_DWithin), Boost Management
     ├── swap/                           # Room Swapping & Subleasing Marketplace, Landlord Approvals
@@ -205,7 +205,7 @@ d:\EXE\backend\src\main\java\vn\phongtroxanh\backend
 | **Room & Spatial** | `/api/v1/rooms` | **15** | Room search, PostGIS MapView (`ST_DWithin`), Side-by-side comparison, Bookmarking, Room CRUD, Boost 7 days. |
 | **Matching Engine** | `/api/v1/matching` | **8** | Discovery feed, Card swiping (LIKE/DISLIKE/SUPER_LIKE), Mutual match detection, Match unlinking. |
 | **Room Swap** | `/api/v1/swaps` | **5** | Lease transfer listings, Search listings, Proposal dispatch, Landlord arbitration and approval. |
-| **Rentals & QR** | `/api/v1/rentals` | **7** | Rental requests, Electronic contracts, Dynamic single-use check-in QR generation, Physical check-in validation. |
+| **Rentals & Handover** | `/api/v1/rentals` | **7** | Rental requests, Lease records, 1-click handover check-in validation, Status lifecycle management. |
 | **Reviews & Disputes** | `/api/v1/reviews` | **8** | Two-way rental evaluations, Dispute evidence attachment, Public responses, Dispute claims. |
 | **Real-time Chat** | `/api/v1/chat` + WS | **5 + 1 WS** | Conversation registry, Historical message retrieval, REST dispatch & STOMP messaging via `/ws/chat`. |
 | **Monetization** | `/api/v1/monetization` | **7** | Tiered plan catalogue, payOS checkout URL generation, signed webhook handling, Transaction logs. |
@@ -334,7 +334,7 @@ The backend includes **22 comprehensive automated test suites** located in `src/
 * **Core Domains & KYC Auditing:**
   - `AdminIntegrityTest`: Platform analytics aggregation and paged KYC verification queue.
   - `RoomServiceTest` & `RoomRequestValidationTest`: PostGIS spatial bounds, pricing validation, and image duplicate detection.
-  - `RentalServiceTest` & `RoomSwapServiceTest`: Lifecycle transitions, QR check-in token generation, and lease transfer arbitration.
+  - `RentalServiceTest` & `RoomSwapServiceTest`: Lifecycle transitions, handover check-in verification, and lease transfer arbitration.
   - `ReviewIntegrityTest`: Two-way rating calculation and dispute mediation workflows.
 
 Execute all suites with fresh database fixtures:
