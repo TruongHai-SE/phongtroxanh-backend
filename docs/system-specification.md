@@ -705,8 +705,8 @@ CREATE TABLE system_audit_logs (
 | # | Method | Endpoint | Quyền (Role) | Mô tả chi tiết chức năng |
 | :-: | :--- | :--- | :--- | :--- |
 | 53 | `GET` | `/api/v1/rentals/landlord/tenants` | `LANDLORD` | Lấy danh sách toàn bộ khách thuê của chủ trọ, trạng thái check-in, TrustScore, thời gian thuê. |
-| 54 | `GET` | `/api/v1/rentals/landlord/qr/{roomId}` | `LANDLORD` | Tạo/Lấy mã QR nhận phòng động và mã OTP 8 ký tự `PTX-XXXX` của phòng. |
-| 55 | `POST` | `/api/v1/rentals/check-in/scan` | `TENANT` | Khách thuê quét mã QR hoặc nhập mã 8 số để Check-in. Hệ thống xác nhận, tăng điểm TrustScore và mở quyền review. |
+| 54 | `GET` | `/api/v1/rentals/{id}/check-in-qr` | Authenticated | Tạo mã xác nhận Check-in nhận phòng động (TTL 5 phút). |
+| 55 | `POST` | `/api/v1/rentals/{id}/check-in` | `LANDLORD`, `TENANT` | Xác nhận bàn giao nhận phòng (1-click hoặc OTP). Hệ thống chuyển hợp đồng sang CHECKED_IN, tăng điểm TrustScore và mở quyền review. |
 | 56 | `GET` | `/api/v1/rentals/me/active` | `TENANT` | Lấy thông tin phòng đang thuê thực tế hiện tại của bản thân. |
 | 57 | `PUT` | `/api/v1/rentals/{id}/terminate` | `LANDLORD`, `TENANT` | Chấm dứt mối quan hệ hợp đồng thuê phòng khi hết thời hạn. |
 | 58 | `GET` | `/api/v1/reviews/rooms/{roomId}` | Public | Lấy danh sách đánh giá của phòng trọ (kèm bộ lọc sao, tags, ảnh). |
@@ -795,7 +795,7 @@ CREATE TABLE system_audit_logs (
    - Caching chi tiết phòng: `room:detail:{id}` (TTL: 1h, tự động xóa cache khi chủ trọ sửa thông tin).
    - Caching danh sách lọc theo quận: `rooms:district:{district_code}:page:{page}` (TTL: 5m).
 2. **Distributed Locking (Redlock) chống Race Condition:**
-   - Khóa phân tán khi Tenant quét mã Check-in: `lock:checkin:{contractId}` (TTL: 10s) nhằm đảm bảo mỗi mã check-in chỉ được xử lý đơn nhất 1 lần duy nhất, tránh tình trạng duplicate check-in.
+   - Khóa phân tán khi xác nhận Check-in bàn giao phòng: `lock:checkin:{contractId}` (TTL: 10s) nhằm đảm bảo mỗi giao dịch check-in chỉ được xử lý đơn nhất 1 lần duy nhất, tránh tình trạng duplicate check-in.
    - Khóa phân tán khi xử lý Webhook thanh toán: `lock:payment:{idempotencyKey}` (TTL: 15s) tránh nhân đôi số dư gói/consumables khi cổng thanh toán retry nhiều lần.
 3. **Bảo mật Dữ liệu Riêng tư (PII Encryption):**
    - Mã hóa cột `id_card_number` bằng thuật toán AES-256-GCM tại tầng cơ sở dữ liệu.

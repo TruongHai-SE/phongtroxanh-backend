@@ -64,4 +64,5 @@ public class TenantOnboardingRequest {
     private Boolean proximityWork;
     private Boolean proximityMarket;
     private Boolean proximityBus;
+    private Boolean isPublic;
 }

@@ -4,7 +4,7 @@
 
 # PhongTrọXanh.vn — Backend Service
 
-> Backend **Modular Monolith** phục vụ tìm phòng trọ, ghép đôi bạn cùng phòng, chấm điểm tín nhiệm và quản lý hồ sơ thuê kèm check-in QR. Hiện chưa có sinh PDF hợp đồng hoặc nhà cung cấp ký điện tử.
+> Backend **Modular Monolith** phục vụ tìm phòng trọ, ghép đôi bạn cùng phòng, chấm điểm tín nhiệm và quản lý hồ sơ thuê kèm xác nhận nhận phòng. Hiện chưa có sinh PDF hợp đồng hoặc nhà cung cấp ký điện tử.
 
 Kết quả MVP: [luồng đã kiểm thử và giới hạn](docs/backend-verification.md). Cấu hình thanh toán: [payOS](docs/payos-setup.md). Hướng dẫn VNPay cũ được thay bằng tài liệu payOS này.
 
@@ -149,12 +149,12 @@ $$\text{MatchingScore} = \sum_{i=1}^{8} (W_i \times S_i) \quad \in [0, 100]$$
 * **Xử lý webhook payOS (Idempotency):** Handler khóa đơn và chỉ cộng quyền lợi khi PENDING; gửi lại SUCCESS được xác nhận mà không cộng lặp. Header Idempotency-Key tránh tạo checkout mới khi retry.
 * **Xung đột trạng thái phòng trọ:** Sử dụng **Optimistic Locking (`@Version`)** trên entity `Room` để ngăn chặn hai người cùng đặt cọc hoặc đổi trạng thái phòng tại cùng một thời điểm.
 
-### 3.3. Dynamic QR Check-in & Chống Gian Lận Đặt Cọc
-Quy trình giao nhận phòng và giải ngân cọc dựa trên mã QR động:
-1. Khi đến nhận phòng, Chủ trọ sinh mã QR Check-in trên ứng dụng.
-2. Backend tạo **Single-Use Check-in Token** với thời gian sống (TTL) 5 phút, lưu vào Redis kèm khóa kiểm tra.
-3. Người thuê dùng camera quét QR $\to$ gửi token về `/api/v1/rentals/{id}/check-in`.
-4. Backend kiểm tra tọa độ GPS của Người thuê (qua PostGIS) so với địa chỉ phòng trọ (trong bán kính 500m), xác minh tính hợp lệ của Token, chuyển hợp đồng sang trạng thái `CHECKED_IN` và **cộng điểm tín nhiệm (+10 TrustScore)** cho cả hai bên. Token bị hủy ngay lập tức khỏi Redis để chống tấn công phát lại (Replay Attack).
+### 3.3. Quy Trình Xác Nhận Nhận Phòng & Bàn Giao (Check-in Handover)
+Quy trình giao nhận phòng và kích hoạt hợp đồng:
+1. Khi đến nhận phòng, Chủ trọ kiểm tra hiện trạng và bấm nút **"Bàn giao phòng"** (`HANDOVER`) trên giao diện quản lý người thuê.
+2. Người thuê xác nhận tại mục **"Hợp đồng thuê của tôi"** (`CONFIRM`).
+3. Backend kiểm tra tính hợp lệ của hợp đồng, chuyển trạng thái sang `CHECKED_IN`, đồng thời tự động chuyển phòng sang `RENTED` (ẩn khỏi danh sách tìm phòng) và **cộng điểm tín nhiệm (+10 TrustScore)** cho cả hai bên.
+4. Hệ thống cũng duy trì endpoint dự phòng hỗ trợ mã xác nhận động khi cần xác minh thêm.
 
 ### 3.4. Mã Hóa Bảo Vệ Dữ Liệu Nhạy Cảm (PII Encryption)
 * Căn cước công dân (CCCD/CMND) và ảnh giấy tờ pháp lý là dữ liệu nhạy cảm cao.
@@ -188,7 +188,7 @@ d:\EXE\backend\src\main\java\vn\phongtroxanh\backend
     ├── misc/                           # Thống kê công khai trang chủ (Landing stats)
     ├── monetization/                   # Gói cước (Plans), Thanh toán payOS, Consumables
     ├── notification/                   # Thông báo In-App, Đăng ký FCM Device Token
-    ├── rental/                         # Hợp đồng thuê, Dynamic Check-in QR Token chống Replay
+    ├── rental/                         # Hợp đồng thuê, xác nhận bàn giao nhận phòng 1-click hoặc OTP
     ├── review/                         # Đánh giá 2 chiều sau thuê, Upload bằng chứng đối chất, Khiếu nại
     ├── room/                           # CRUD Phòng, PostGIS MapView (ST_DWithin), Boost phòng 7 ngày, So sánh
     ├── swap/                           # Đăng tin hoán đổi/nhượng phòng (Pass phòng), Đề xuất, Duyệt chủ trọ
@@ -204,7 +204,7 @@ d:\EXE\backend\src\main\java\vn\phongtroxanh\backend
 | **Room & Spatial** | `/api/v1/rooms` | **15** | Tìm kiếm phòng trọ, PostGIS MapView, so sánh phòng, bookmark yêu thích, CRUD phòng của chủ trọ, upload ảnh, boost phòng. |
 | **Matching Engine** | `/api/v1/matching` | **8** | Discovery feed bạn cùng phòng, quẹt hồ sơ (LIKE/DISLIKE/SUPER_LIKE), phát hiện mutual match, danh sách kết đôi. |
 | **Room Swap** | `/api/v1/swaps` | **5** | Đăng tin hoán đổi/nhượng phòng, tìm kiếm tin pass phòng, gửi đề xuất hoán đổi, chủ trọ phê duyệt. |
-| **Rentals & QR** | `/api/v1/rentals` | **7** | Tạo yêu cầu thuê, hồ sơ thuê, sinh mã QR Check-in động (TTL 5p), quét QR kích hoạt hợp đồng. |
+| **Rentals & Deposits** | `/api/v1/rentals` | **7** | Tạo yêu cầu thuê, hồ sơ thuê, xác nhận nhận phòng/bàn giao 1-click kích hoạt hợp đồng. |
 | **Reviews & Disputes** | `/api/v1/reviews` | **8** | Đánh giá 2 chiều sau thuê, upload ảnh bằng chứng, phản hồi đánh giá, gửi đơn khiếu nại đánh giá sai sự thật. |
 | **Realtime Chat** | `/api/v1/chat` + WS | **5 + 1 WS** | Lấy danh sách hội thoại, lịch sử tin nhắn, gửi tin nhắn REST & STOMP WebSocket qua endpoint `/ws/chat`. |
 | **Monetization** | `/api/v1/monetization` | **7** | Danh sách gói dịch vụ, tạo URL thanh toán payOS, xác minh webhook, lịch sử giao dịch. |
@@ -349,7 +349,7 @@ Hệ thống được bảo vệ bởi **22 bộ kiểm thử tự động toàn
 * **Nghiệp Vụ Cốt Lõi & Hàng Đợi KYC:**
   - AdminIntegrityTest: Kiểm tra tính toán số liệu thống kê Dashboard và phân trang hàng đợi duyệt CCCD.
   - RoomServiceTest & RoomRequestValidationTest: Kiểm tra tìm kiếm không gian PostGIS và thuật toán pHash chống trùng ảnh phòng.
-  - RentalServiceTest & RoomSwapServiceTest: Vòng đời hợp đồng thuê, sinh mã QR check-in dùng 1 lần và phê duyệt đổi phòng.
+  - RentalServiceTest & RoomSwapServiceTest: Vòng đời hợp đồng thuê, xác nhận bàn giao check-in và phê duyệt đổi phòng.
   - ReviewIntegrityTest: Tính điểm tín nhiệm 2 chiều và quy trình xử lý khiếu nại đánh giá.
 
 Chạy toàn bộ test suites:
