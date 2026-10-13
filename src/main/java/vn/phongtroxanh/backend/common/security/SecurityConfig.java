@@ -93,6 +93,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/rooms/compare").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/rooms/{id}").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/reviews/rooms/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/reviews/system-feedback").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/reviews/system-feedbacks").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/monetization/plans").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/monetization/payos-webhook").permitAll()
                         .requestMatchers("/api/v1/locations/**").permitAll()
