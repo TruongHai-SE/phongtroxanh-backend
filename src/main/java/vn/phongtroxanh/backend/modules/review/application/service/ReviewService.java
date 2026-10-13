@@ -344,14 +344,73 @@ public class ReviewService {
     }
 
     @Transactional
+    public ReviewResponse updateReview(UUID reviewId, UpdateReviewRequest request) {
+        Review review = reviewRepository.findById(reviewId)
+                .orElseThrow(() -> new ResourceNotFoundException("REVIEW_NOT_FOUND", "Đánh giá không tồn tại"));
+
+        UUID currentUserId = SecurityUtils.getCurrentUserId();
+        if (!review.getReviewerId().equals(currentUserId)) {
+            throw new ForbiddenException("BOLA_FORBIDDEN", "Chỉ người viết đánh giá mới có quyền chỉnh sửa");
+        }
+
+        if ("UNDER_DISPUTE".equals(review.getStatus())) {
+            throw new BadRequestException("REVIEW_UNDER_DISPUTE", "Đánh giá đang trong quá trình khiếu nại, không thể chỉnh sửa");
+        }
+
+        if ("REMOVED".equals(review.getStatus())) {
+            throw new BadRequestException("REVIEW_REMOVED", "Đánh giá này đã bị gỡ bỏ, không thể chỉnh sửa");
+        }
+
+        int oldRating = review.getRating() != null ? review.getRating() : 5;
+        int newRating = request.getRating();
+
+        int oldScoreEffect = (oldRating >= 4) ? 5 : (oldRating <= 2 ? -10 : 0);
+        int newScoreEffect = (newRating >= 4) ? 5 : (newRating <= 2 ? -10 : 0);
+        int scoreDelta = newScoreEffect - oldScoreEffect;
+
+        review.setRating(newRating);
+        review.setComment(request.getComment().trim());
+        if (request.getTags() != null) {
+            review.setTags(request.getTags());
+        }
+        if (request.getImages() != null) {
+            review.setImages(request.getImages());
+        }
+        review = reviewRepository.save(review);
+
+        if (scoreDelta != 0) {
+            adjustTrustScore(
+                    review.getRevieweeId(),
+                    scoreDelta,
+                    "Cập nhật đánh giá từ " + oldRating + " sao thành " + newRating + " sao"
+            );
+        }
+
+        log.info("User {} updated review {} with rating {} (scoreDelta={})", currentUserId, reviewId, newRating, scoreDelta);
+        return mapToResponse(review);
+    }
+
+    @Transactional
     public SystemFeedbackResponse createSystemFeedback(CreateSystemFeedbackRequest request) {
         UUID currentUserId = SecurityUtils.getCurrentUserIdSafely().orElse(null);
-        SystemFeedback feedback = SystemFeedback.builder()
-                .userId(currentUserId)
-                .rating(request.getRating())
-                .category(request.getCategory() != null ? request.getCategory() : "app_experience")
-                .comment(request.getComment().trim())
-                .build();
+        SystemFeedback feedback = null;
+
+        if (currentUserId != null && systemFeedbackRepository != null) {
+            feedback = systemFeedbackRepository.findFirstByUserIdOrderByCreatedAtDesc(currentUserId).orElse(null);
+        }
+
+        if (feedback != null) {
+            feedback.setRating(request.getRating());
+            feedback.setCategory(request.getCategory() != null ? request.getCategory() : "app_experience");
+            feedback.setComment(request.getComment().trim());
+        } else {
+            feedback = SystemFeedback.builder()
+                    .userId(currentUserId)
+                    .rating(request.getRating())
+                    .category(request.getCategory() != null ? request.getCategory() : "app_experience")
+                    .comment(request.getComment().trim())
+                    .build();
+        }
 
         if (systemFeedbackRepository != null) {
             feedback = systemFeedbackRepository.save(feedback);
@@ -377,6 +436,45 @@ public class ReviewService {
                 .comment(feedback.getComment())
                 .createdAt(feedback.getCreatedAt())
                 .build();
+    }
+
+    public SystemFeedbackResponse getMySystemFeedback() {
+        UUID currentUserId = SecurityUtils.getCurrentUserId();
+        if (systemFeedbackRepository == null) {
+            throw new ResourceNotFoundException("FEEDBACK_NOT_FOUND", "Chưa có đánh giá nào");
+        }
+        SystemFeedback fb = systemFeedbackRepository.findFirstByUserIdOrderByCreatedAtDesc(currentUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("FEEDBACK_NOT_FOUND", "Bạn chưa gửi góp ý nào"));
+
+        String userName = "Người dùng ẩn danh";
+        String userRole = "TENANT";
+        if (userRepository != null) {
+            User u = userRepository.findById(currentUserId).orElse(null);
+            if (u != null) {
+                userName = u.getFullName() != null ? u.getFullName() : u.getEmail();
+                userRole = u.getRole() != null ? u.getRole().name() : "TENANT";
+            }
+        }
+
+        return SystemFeedbackResponse.builder()
+                .id(fb.getId())
+                .userId(fb.getUserId())
+                .userName(userName)
+                .userRole(userRole)
+                .rating(fb.getRating())
+                .category(fb.getCategory())
+                .comment(fb.getComment())
+                .createdAt(fb.getCreatedAt())
+                .build();
+    }
+
+    @Transactional
+    public void deleteSystemFeedback(UUID id) {
+        if (systemFeedbackRepository == null) return;
+        SystemFeedback fb = systemFeedbackRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("FEEDBACK_NOT_FOUND", "Không tìm thấy góp ý này"));
+        systemFeedbackRepository.delete(fb);
+        log.info("Admin deleted system feedback {}", id);
     }
 
     public Page<SystemFeedbackResponse> getSystemFeedbacks(int page, int limit) {
