@@ -102,4 +102,44 @@ public class ReviewController {
         ReviewResponse response = reviewService.resolveDispute(disputeId, request);
         return ResponseEntity.ok(ApiResponse.ok("Giải quyết khiếu nại thành công", response));
     }
+
+    @PutMapping("/{id}")
+    @Operation(summary = "API #71: Chỉnh sửa đánh giá", description = "Người viết đánh giá cập nhật lại số sao, nhận xét và nhãn, tự động điều chỉnh lại TrustScore của bên nhận")
+    public ResponseEntity<ApiResponse<ReviewResponse>> updateReview(
+            @PathVariable("id") UUID id,
+            @Valid @RequestBody UpdateReviewRequest request) {
+
+        ReviewResponse response = reviewService.updateReview(id, request);
+        return ResponseEntity.ok(ApiResponse.ok("Cập nhật đánh giá thành công", response));
+    }
+
+    @PostMapping("/system-feedback")
+    @Operation(summary = "API #69: Gửi hoặc cập nhật góp ý & đánh giá hệ thống", description = "Chủ trọ hoặc Người thuê gửi hoặc cập nhật đánh giá sao kèm nhận xét về nền tảng")
+    public ResponseEntity<ApiResponse<SystemFeedbackResponse>> createSystemFeedback(@Valid @RequestBody CreateSystemFeedbackRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.created("Gửi đánh giá hệ thống thành công", reviewService.createSystemFeedback(request)));
+    }
+
+    @GetMapping("/system-feedback/me")
+    @Operation(summary = "API #72: Lấy góp ý hệ thống của tài khoản hiện tại", description = "Lấy đánh giá hệ thống trước đó của người dùng đang đăng nhập để hiển thị chỉnh sửa")
+    public ResponseEntity<ApiResponse<SystemFeedbackResponse>> getMySystemFeedback() {
+        return ResponseEntity.ok(ApiResponse.ok("Lấy đánh giá của tôi thành công", reviewService.getMySystemFeedback()));
+    }
+
+    @DeleteMapping("/system-feedback/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "API #73: Admin xóa góp ý hệ thống sai lệch", description = "Admin xóa các đánh giá/góp ý hệ thống spam hoặc thông tin không chính xác")
+    public ResponseEntity<ApiResponse<Void>> deleteSystemFeedback(@PathVariable("id") UUID id) {
+        reviewService.deleteSystemFeedback(id);
+        return ResponseEntity.ok(ApiResponse.ok("Đã xóa góp ý thành công", null));
+    }
+
+    @GetMapping("/system-feedbacks")
+    @Operation(summary = "API #70: Lấy danh sách đánh giá hệ thống có phân trang", description = "Lấy danh sách các đánh giá nền tảng từ người dùng có phân trang")
+    public ResponseEntity<ApiResponse<Page<SystemFeedbackResponse>>> getSystemFeedbacks(
+            @RequestParam(value = "page", required = false, defaultValue = "0") int page,
+            @RequestParam(value = "limit", required = false, defaultValue = "20") int limit) {
+        return ResponseEntity.ok(ApiResponse.ok("Lấy danh sách đánh giá hệ thống thành công", reviewService.getSystemFeedbacks(page, limit)));
+    }
 }
+

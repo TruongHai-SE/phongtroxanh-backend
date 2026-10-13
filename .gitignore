@@ -121,3 +121,5 @@ repomix-output.*
 # ==============================================================================
 src/main/resources/db/seed_mock_data.sql
 src/main/resources/db/seed*.sql
+src/main/resources/db/cleanup_mock_data.sql
+src/main/resources/db/cleanup*.sql

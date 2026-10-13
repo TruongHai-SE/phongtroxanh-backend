@@ -25,8 +25,10 @@ public class AdminDashboardResponse {
     private long pendingKycCount;
     private long pendingDisputesCount;
     private BigDecimal totalRevenue;
+    private long totalTransactions;
     private long totalReviews;
     private double averageRating;
+    private double landlordAverageRating;
     private long verifiedUsersCount;
 
     // Dữ liệu phân tích chuyên sâu cho các Tab (100% từ Database thực)
@@ -34,11 +36,28 @@ public class AdminDashboardResponse {
     private List<TrustScoreRangeDTO> trustScoreDistribution;
     private List<RatingBreakdownDTO> ratingDistribution;
     private List<RecentReviewDTO> recentReviews;
+    private List<SystemFeedbackItemDTO> systemFeedbacks;
     private List<PackageRevenueDTO> packageStats;
     private List<CategoryStatDTO> roomTypeDistribution;
     private List<CategoryStatDTO> districtDistribution;
     private List<CategoryStatDTO> roomStatusDistribution;
     private KycOverviewDTO kycOverview;
+
+    @Getter
+    @Setter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SystemFeedbackItemDTO {
+        private UUID id;
+        private UUID userId;
+        private String userName;
+        private String userRole;
+        private int rating;
+        private String category;
+        private String comment;
+        private Instant createdAt;
+    }
 
     @Getter
     @Setter
@@ -106,8 +125,12 @@ public class AdminDashboardResponse {
         private UUID id;
         private String reviewerName;
         private String reviewerRole;
+        private String landlordName;
+        private Boolean isVerifiedStay;
         private int rating;
         private String comment;
+        private String landlordReply;
+        private Instant repliedAt;
         private String roomTitle;
         private Instant createdAt;
     }
