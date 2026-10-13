@@ -29,6 +29,7 @@ import vn.phongtroxanh.backend.modules.review.domain.ReviewDispute;
 import vn.phongtroxanh.backend.modules.review.domain.ReviewDisputeStatus;
 import vn.phongtroxanh.backend.modules.review.infrastructure.repository.ReviewDisputeRepository;
 import vn.phongtroxanh.backend.modules.review.infrastructure.repository.ReviewRepository;
+import vn.phongtroxanh.backend.modules.review.infrastructure.repository.SystemFeedbackRepository;
 import vn.phongtroxanh.backend.modules.room.domain.Room;
 import vn.phongtroxanh.backend.modules.room.domain.RoomStatus;
 import vn.phongtroxanh.backend.modules.room.infrastructure.repository.RoomRepository;
@@ -61,6 +62,7 @@ public class AdminService {
     private final RentalRepository rentalRepository;
     private final ReviewRepository reviewRepository;
     private final ReviewDisputeRepository reviewDisputeRepository;
+    private final SystemFeedbackRepository systemFeedbackRepository;
     private final PaymentTransactionRepository paymentTransactionRepository;
     private final ReportRepository reportRepository;
     private final SystemAuditLogRepository systemAuditLogRepository;
@@ -86,6 +88,8 @@ public class AdminService {
                 .filter(t -> t.getStatus() == PaymentStatus.SUCCESS)
                 .toList();
 
+        long totalTransactions = successfulTx.size();
+
         BigDecimal totalRevenue = successfulTx.stream()
                 .map(PaymentTransaction::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -95,8 +99,20 @@ public class AdminService {
         double averageRating = allReviews.stream()
                 .mapToInt(Review::getRating)
                 .average()
-                .orElse(4.9);
+                .orElse(0.0);
         averageRating = Math.round(averageRating * 10.0) / 10.0;
+
+        double landlordAverageRating = allReviews.stream()
+                .filter(r -> {
+                    if (r.getRoomId() != null) return true;
+                    User reviewee = userRepository.findById(r.getRevieweeId()).orElse(null);
+                    return reviewee != null && reviewee.getRole() == UserRole.LANDLORD;
+                })
+                .mapToInt(Review::getRating)
+                .average()
+                .orElse(averageRating > 0 ? averageRating : 0.0);
+        landlordAverageRating = Math.round(landlordAverageRating * 10.0) / 10.0;
+
         long verifiedUsersCount = allUsers.stream()
                 .filter(u -> Boolean.TRUE.equals(u.getIsVerified()))
                 .count();
@@ -141,15 +157,19 @@ public class AdminService {
             ratingDistribution.add(new AdminDashboardResponse.RatingBreakdownDTO(star, count, pct));
         }
 
-        // 4. Danh sách đánh giá gần đây nhất từ DB
+        // 4. Danh sách đánh giá từ DB (lấy tối đa 100 đánh giá gần đây nhất để admin lọc và theo dõi)
         List<AdminDashboardResponse.RecentReviewDTO> recentReviews = allReviews.stream()
                 .sorted((a, b) -> (b.getCreatedAt() != null ? b.getCreatedAt() : Instant.MIN)
                         .compareTo(a.getCreatedAt() != null ? a.getCreatedAt() : Instant.MIN))
-                .limit(4)
+                .limit(100)
                 .map(r -> {
                     User reviewer = userRepository.findById(r.getReviewerId()).orElse(null);
                     String name = reviewer != null ? reviewer.getFullName() : "Người dùng Phòng Trọ Xanh";
                     String roleStr = (reviewer != null && reviewer.getRole() == UserRole.LANDLORD) ? "Chủ trọ" : "Người thuê";
+
+                    User landlord = r.getRevieweeId() != null ? userRepository.findById(r.getRevieweeId()).orElse(null) : null;
+                    String lName = landlord != null ? landlord.getFullName() : "Chủ trọ hệ thống";
+
                     String rTitle = "Phòng trọ cao cấp";
                     if (r.getRoomId() != null) {
                         Room room = roomRepository.findById(r.getRoomId()).orElse(null);
@@ -161,8 +181,12 @@ public class AdminService {
                             .id(r.getId())
                             .reviewerName(name)
                             .reviewerRole(roleStr)
+                            .landlordName(lName)
+                            .isVerifiedStay(r.getIsVerifiedStay() != null ? r.getIsVerifiedStay() : true)
                             .rating(r.getRating() != null ? r.getRating() : 5)
                             .comment(r.getComment())
+                            .landlordReply(r.getLandlordReply())
+                            .repliedAt(r.getRepliedAt())
                             .roomTitle(rTitle)
                             .createdAt(r.getCreatedAt())
                             .build();
@@ -236,6 +260,30 @@ public class AdminService {
                 .approvalRate(approvalRate)
                 .build();
 
+        List<AdminDashboardResponse.SystemFeedbackItemDTO> systemFeedbackDTOs = systemFeedbackRepository.findAllByOrderByCreatedAtDesc(PageRequest.of(0, 100)).getContent().stream()
+                .map(fb -> {
+                    String userName = "Người dùng ẩn danh";
+                    String userRole = "TENANT";
+                    if (fb.getUserId() != null) {
+                        User u = userRepository.findById(fb.getUserId()).orElse(null);
+                        if (u != null) {
+                            userName = u.getFullName() != null ? u.getFullName() : u.getEmail();
+                            userRole = u.getRole() != null ? u.getRole().name() : "TENANT";
+                        }
+                    }
+                    return AdminDashboardResponse.SystemFeedbackItemDTO.builder()
+                            .id(fb.getId())
+                            .userId(fb.getUserId())
+                            .userName(userName)
+                            .userRole(userRole)
+                            .rating(fb.getRating())
+                            .category(fb.getCategory())
+                            .comment(fb.getComment())
+                            .createdAt(fb.getCreatedAt())
+                            .build();
+                })
+                .toList();
+
         return AdminDashboardResponse.builder()
                 .totalUsers(totalUsers)
                 .totalLandlords(totalLandlords)
@@ -248,13 +296,16 @@ public class AdminService {
                 .pendingKycCount(pendingKyc)
                 .pendingDisputesCount(pendingDisputes)
                 .totalRevenue(totalRevenue)
+                .totalTransactions(totalTransactions)
                 .totalReviews(totalReviews)
                 .averageRating(averageRating)
+                .landlordAverageRating(landlordAverageRating)
                 .verifiedUsersCount(verifiedUsersCount)
                 .trustScoreDistribution(trustScoreDistribution)
                 .monthlyStats(monthlyStats)
                 .ratingDistribution(ratingDistribution)
                 .recentReviews(recentReviews)
+                .systemFeedbacks(systemFeedbackDTOs)
                 .packageStats(packageStats)
                 .roomTypeDistribution(roomTypeDistribution)
                 .districtDistribution(topDistricts)

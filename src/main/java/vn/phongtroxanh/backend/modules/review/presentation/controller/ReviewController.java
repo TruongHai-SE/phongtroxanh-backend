@@ -102,4 +102,20 @@ public class ReviewController {
         ReviewResponse response = reviewService.resolveDispute(disputeId, request);
         return ResponseEntity.ok(ApiResponse.ok("Giải quyết khiếu nại thành công", response));
     }
+
+    @PostMapping("/system-feedback")
+    @Operation(summary = "API #69: Gửi góp ý & đánh giá hệ thống", description = "Chủ trọ hoặc Người thuê gửi đánh giá sao kèm nhận xét về nền tảng")
+    public ResponseEntity<ApiResponse<SystemFeedbackResponse>> createSystemFeedback(@Valid @RequestBody CreateSystemFeedbackRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.created("Gửi đánh giá hệ thống thành công", reviewService.createSystemFeedback(request)));
+    }
+
+    @GetMapping("/system-feedbacks")
+    @Operation(summary = "API #70: Lấy danh sách đánh giá hệ thống có phân trang", description = "Lấy danh sách các đánh giá nền tảng từ người dùng có phân trang")
+    public ResponseEntity<ApiResponse<Page<SystemFeedbackResponse>>> getSystemFeedbacks(
+            @RequestParam(value = "page", required = false, defaultValue = "0") int page,
+            @RequestParam(value = "limit", required = false, defaultValue = "20") int limit) {
+        return ResponseEntity.ok(ApiResponse.ok("Lấy danh sách đánh giá hệ thống thành công", reviewService.getSystemFeedbacks(page, limit)));
+    }
 }
+
