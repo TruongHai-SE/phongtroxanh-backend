@@ -30,6 +30,10 @@ public class AdminDashboardResponse {
     private double averageRating;
     private double landlordAverageRating;
     private long verifiedUsersCount;
+    private long pendingReportsCount;
+    private long totalSwipes;
+    private long totalSwapRequests;
+    private long activeBoostedRooms;
 
     // Dữ liệu phân tích chuyên sâu cho các Tab (100% từ Database thực)
     private List<MonthlyStatDTO> monthlyStats;
@@ -41,7 +45,21 @@ public class AdminDashboardResponse {
     private List<CategoryStatDTO> roomTypeDistribution;
     private List<CategoryStatDTO> districtDistribution;
     private List<CategoryStatDTO> roomStatusDistribution;
+    private List<CategoryStatDTO> lifestyleStats;
+    private List<CategoryStatDTO> personalizationFunnel;
+    private List<DistrictSupplyDemandDTO> districtSupplyDemand;
     private KycOverviewDTO kycOverview;
+
+    @Getter
+    @Setter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DistrictSupplyDemandDTO {
+        private String district;
+        private long supply;
+        private long demand;
+    }
 
     @Getter
     @Setter

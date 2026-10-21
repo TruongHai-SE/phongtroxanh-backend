@@ -18,6 +18,7 @@ import vn.phongtroxanh.backend.modules.admin.infrastructure.repository.ReportRep
 import vn.phongtroxanh.backend.modules.admin.infrastructure.repository.SystemAuditLogRepository;
 import vn.phongtroxanh.backend.modules.admin.presentation.dto.*;
 import vn.phongtroxanh.backend.modules.matching.infrastructure.repository.MatchRepository;
+import vn.phongtroxanh.backend.modules.matching.infrastructure.repository.SwipeRepository;
 import vn.phongtroxanh.backend.modules.monetization.domain.PaymentStatus;
 import vn.phongtroxanh.backend.modules.monetization.domain.PaymentTransaction;
 import vn.phongtroxanh.backend.modules.monetization.infrastructure.repository.PaymentTransactionRepository;
@@ -33,6 +34,9 @@ import vn.phongtroxanh.backend.modules.review.infrastructure.repository.SystemFe
 import vn.phongtroxanh.backend.modules.room.domain.Room;
 import vn.phongtroxanh.backend.modules.room.domain.RoomStatus;
 import vn.phongtroxanh.backend.modules.room.infrastructure.repository.RoomRepository;
+import vn.phongtroxanh.backend.modules.room.infrastructure.repository.RoomSwipeRepository;
+import vn.phongtroxanh.backend.modules.swap.domain.SwapRequest;
+import vn.phongtroxanh.backend.modules.swap.infrastructure.repository.SwapRequestRepository;
 import vn.phongtroxanh.backend.modules.user.domain.*;
 import vn.phongtroxanh.backend.modules.user.infrastructure.repository.*;
 
@@ -45,8 +49,11 @@ import java.math.BigDecimal;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
@@ -55,10 +62,14 @@ import java.util.UUID;
 public class AdminService {
 
     private final UserRepository userRepository;
+    private final UserProfileRepository userProfileRepository;
     private final UserVerificationRepository userVerificationRepository;
     private final TrustScoreLogRepository trustScoreLogRepository;
     private final RoomRepository roomRepository;
+    private final RoomSwipeRepository roomSwipeRepository;
     private final MatchRepository matchRepository;
+    private final SwipeRepository swipeRepository;
+    private final SwapRequestRepository swapRequestRepository;
     private final RentalRepository rentalRepository;
     private final ReviewRepository reviewRepository;
     private final ReviewDisputeRepository reviewDisputeRepository;
@@ -83,6 +94,11 @@ public class AdminService {
         long activeRentals = rentalRepository.findAll().stream().filter(r -> r.getStatus() == RentalStatus.CHECKED_IN).count();
         long pendingKyc = userVerificationRepository.findByStatus(VerificationStatus.PENDING, Pageable.unpaged()).getTotalElements();
         long pendingDisputes = reviewDisputeRepository.findByStatus("PENDING_REVIEW", Pageable.unpaged()).getTotalElements();
+        long pendingReports = reportRepository.findByStatusOrderByCreatedAtDesc(ReportStatus.NEW, Pageable.unpaged()).getTotalElements()
+                + reportRepository.findByStatusOrderByCreatedAtDesc(ReportStatus.INVESTIGATING, Pageable.unpaged()).getTotalElements();
+        long totalSwipes = swipeRepository.count() + roomSwipeRepository.count();
+        List<SwapRequest> allSwaps = swapRequestRepository.findAll();
+        long totalSwapRequests = allSwaps.size();
 
         List<PaymentTransaction> successfulTx = paymentTransactionRepository.findAll().stream()
                 .filter(t -> t.getStatus() == PaymentStatus.SUCCESS)
@@ -203,6 +219,8 @@ public class AdminService {
         });
 
         List<Room> allRoomsList = roomRepository.findAll();
+        long activeBoostedRooms = allRoomsList.stream().filter(r -> Boolean.TRUE.equals(r.getIsBoosted())).count();
+
         // 6. Phân bố loại phòng thực tế từ DB
         Map<String, Long> roomTypeCounts = allRoomsList.stream()
                 .filter(r -> r.getRoomType() != null)
@@ -260,6 +278,74 @@ public class AdminService {
                 .approvalRate(approvalRate)
                 .build();
 
+        // 10. Thống kê hồ sơ cá nhân hóa (UserProfile) & Tương quan Cung - Cầu theo Quận
+        List<UserProfile> allProfiles = userProfileRepository.findAll();
+        List<UserProfile> surveyedProfiles = allProfiles.stream()
+                .filter(p -> p.getNonSmoking() != null || p.getEarlySleeper() != null
+                        || p.getIsNeat() != null || p.getAllowGuests() != null
+                        || p.getProximitySchool() != null || p.getProximityMarket() != null)
+                .toList();
+        long profileTotal = surveyedProfiles.size();
+        long nonSmokingCount = surveyedProfiles.stream().filter(p -> Boolean.TRUE.equals(p.getNonSmoking())).count();
+        long earlySleeperCount = surveyedProfiles.stream().filter(p -> Boolean.TRUE.equals(p.getEarlySleeper())).count();
+        long neatCount = surveyedProfiles.stream().filter(p -> Boolean.TRUE.equals(p.getIsNeat()) || (p.getCleanlinessLevel() != null && p.getCleanlinessLevel() >= 4)).count();
+        long allowGuestsCount = surveyedProfiles.stream().filter(p -> Boolean.TRUE.equals(p.getAllowGuests())).count();
+        long proxSchoolCount = surveyedProfiles.stream().filter(p -> Boolean.TRUE.equals(p.getProximitySchool())).count();
+        long proxMarketCount = surveyedProfiles.stream().filter(p -> Boolean.TRUE.equals(p.getProximityMarket())).count();
+        long proxBusCount = surveyedProfiles.stream().filter(p -> Boolean.TRUE.equals(p.getProximityBus())).count();
+        long noiseTolerantCount = surveyedProfiles.stream().filter(p -> p.getNoiseTolerance() != null && p.getNoiseTolerance() >= 50).count();
+
+        List<AdminDashboardResponse.CategoryStatDTO> lifestyleStats = List.of(
+                new AdminDashboardResponse.CategoryStatDTO("Không hút thuốc", nonSmokingCount, profileTotal > 0 ? Math.round(nonSmokingCount * 100.0 / profileTotal) : 0),
+                new AdminDashboardResponse.CategoryStatDTO("Ngủ sớm (<23h)", earlySleeperCount, profileTotal > 0 ? Math.round(earlySleeperCount * 100.0 / profileTotal) : 0),
+                new AdminDashboardResponse.CategoryStatDTO("Ưa gọn gàng", neatCount, profileTotal > 0 ? Math.round(neatCount * 100.0 / profileTotal) : 0),
+                new AdminDashboardResponse.CategoryStatDTO("Cho phép khách", allowGuestsCount, profileTotal > 0 ? Math.round(allowGuestsCount * 100.0 / profileTotal) : 0),
+                new AdminDashboardResponse.CategoryStatDTO("Gần Trường học", proxSchoolCount, profileTotal > 0 ? Math.round(proxSchoolCount * 100.0 / profileTotal) : 0),
+                new AdminDashboardResponse.CategoryStatDTO("Gần Chợ / Siêu thị", proxMarketCount, profileTotal > 0 ? Math.round(proxMarketCount * 100.0 / profileTotal) : 0),
+                new AdminDashboardResponse.CategoryStatDTO("Gần Trạm Bus", proxBusCount, profileTotal > 0 ? Math.round(proxBusCount * 100.0 / profileTotal) : 0),
+                new AdminDashboardResponse.CategoryStatDTO("Chịu ồn (>=50%)", noiseTolerantCount, profileTotal > 0 ? Math.round(noiseTolerantCount * 100.0 / profileTotal) : 0)
+        );
+
+        long baseTenants = Math.max(totalTenants, 1);
+        List<AdminDashboardResponse.CategoryStatDTO> personalizationFunnel = List.of(
+                new AdminDashboardResponse.CategoryStatDTO("Người thuê đăng ký", totalTenants, totalTenants > 0 ? 100 : 0),
+                new AdminDashboardResponse.CategoryStatDTO("Hoàn tất khảo sát", profileTotal, Math.min(100, Math.round(profileTotal * 100.0 / baseTenants))),
+                new AdminDashboardResponse.CategoryStatDTO("Đã xác thực CCCD", verifiedUsersCount, Math.min(100, Math.round(verifiedUsersCount * 100.0 / Math.max(totalUsers, 1)))),
+                new AdminDashboardResponse.CategoryStatDTO("Ghép đôi thành công", totalMatches, Math.min(100, Math.round(totalMatches * 100.0 / baseTenants))),
+                new AdminDashboardResponse.CategoryStatDTO("Hợp đồng thuê", totalRentals, Math.min(100, Math.round(totalRentals * 100.0 / baseTenants)))
+        );
+
+        Map<String, Long> demandByDistrict = new HashMap<>();
+        for (UserProfile p : allProfiles) {
+            if (p.getPreferredDistricts() != null) {
+                for (String d : p.getPreferredDistricts()) {
+                    if (d != null && !d.isBlank()) {
+                        demandByDistrict.merge(d.trim(), 1L, Long::sum);
+                    }
+                }
+            }
+        }
+        for (SwapRequest sw : allSwaps) {
+            if (sw.getTargetDistricts() != null) {
+                for (String d : sw.getTargetDistricts()) {
+                    if (d != null && !d.isBlank()) {
+                        demandByDistrict.merge(d.trim(), 1L, Long::sum);
+                    }
+                }
+            }
+        }
+        Set<String> allDistrictNames = new HashSet<>(districtCounts.keySet());
+        allDistrictNames.addAll(demandByDistrict.keySet());
+        List<AdminDashboardResponse.DistrictSupplyDemandDTO> districtSupplyDemand = allDistrictNames.stream()
+                .map(d -> new AdminDashboardResponse.DistrictSupplyDemandDTO(
+                        d,
+                        districtCounts.getOrDefault(d, 0L),
+                        demandByDistrict.getOrDefault(d, 0L)
+                ))
+                .sorted((a, b) -> Long.compare(b.getSupply() + b.getDemand(), a.getSupply() + a.getDemand()))
+                .limit(6)
+                .toList();
+
         List<AdminDashboardResponse.SystemFeedbackItemDTO> systemFeedbackDTOs = systemFeedbackRepository.findAllByOrderByCreatedAtDesc(PageRequest.of(0, 100)).getContent().stream()
                 .map(fb -> {
                     String userName = "Người dùng ẩn danh";
@@ -295,6 +381,10 @@ public class AdminService {
                 .activeRentals(activeRentals)
                 .pendingKycCount(pendingKyc)
                 .pendingDisputesCount(pendingDisputes)
+                .pendingReportsCount(pendingReports)
+                .totalSwipes(totalSwipes)
+                .totalSwapRequests(totalSwapRequests)
+                .activeBoostedRooms(activeBoostedRooms)
                 .totalRevenue(totalRevenue)
                 .totalTransactions(totalTransactions)
                 .totalReviews(totalReviews)
@@ -310,6 +400,9 @@ public class AdminService {
                 .roomTypeDistribution(roomTypeDistribution)
                 .districtDistribution(topDistricts)
                 .roomStatusDistribution(roomStatusDistribution)
+                .lifestyleStats(lifestyleStats)
+                .personalizationFunnel(personalizationFunnel)
+                .districtSupplyDemand(districtSupplyDemand)
                 .kycOverview(kycOverview)
                 .build();
     }
