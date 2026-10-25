@@ -415,6 +415,10 @@ public class RoomService {
         if (room.getStatus() != RoomStatus.AVAILABLE || room.getExpiresAt() == null || !room.getExpiresAt().isAfter(Instant.now())) {
             throw new BadRequestException("ROOM_NOT_AVAILABLE", "Chỉ có thể đẩy tin phòng đang còn hiệu lực và có sẵn");
         }
+        User landlord = userRepository.findById(landlordId).orElse(null);
+        if (landlord != null && landlord.getStrikeCount() != null && landlord.getStrikeCount() >= 2) {
+            throw new BadRequestException("BOOST_RESTRICTED", "Tài khoản đang ở mức cảnh báo vi phạm 2/3, tạm thời không thể sử dụng tính năng đẩy tin ưu tiên");
+        }
         if (userConsumableRepository.decrementBoostAtomic(landlordId) == 0) {
             throw new BadRequestException("INSUFFICIENT_BOOSTS", "Số lượt đẩy tin của bạn đã hết");
         }
@@ -422,6 +426,7 @@ public class RoomService {
         Instant boostFrom = hasActiveBoost(room) ? room.getBoostExpiresAt() : Instant.now();
         room.setIsBoosted(true);
         room.setBoostExpiresAt(boostFrom.plus(7, ChronoUnit.DAYS));
+        room.setUpdatedAt(Instant.now());
         roomRepository.save(room);
         log.info("Landlord {} boosted room {}", landlordId, roomId);
     }
@@ -625,7 +630,7 @@ public class RoomService {
         }
 
         if (coordinates == null) {
-            throw new BadRequestException("COORDINATES_REQUIRED", "Không thể xác định vị trí qua địa chỉ đã nhập. Vui lòng kiểm tra lại địa chỉ hoặc dịch vụ bản đồ Goong Maps.");
+            throw new BadRequestException("COORDINATES_REQUIRED", "Không thể xác định tọa độ từ địa chỉ đã nhập. Vui lòng chọn địa chỉ từ danh sách gợi ý hoặc kiểm tra lại tên đường, quận/huyện.");
         }
 
         validateCoordinates(coordinates.latitude(), coordinates.longitude());
