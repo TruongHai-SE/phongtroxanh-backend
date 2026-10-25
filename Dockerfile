@@ -28,5 +28,17 @@ COPY --from=build --chown=appuser:appgroup /app/target/*.jar app.jar
 ENV PORT=8080
 EXPOSE 8080
 
-# Optimize JVM memory limits for Render 512MB RAM tier
-ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-Djava.security.egd=file:/dev/./urandom", "-jar", "app.jar"]
+# Optimize JVM memory & CPU limits for Render 512MB RAM / fractional CPU tier
+ENTRYPOINT ["java", \
+  "-XX:+UseContainerSupport", \
+  "-XX:+UseSerialGC", \
+  "-XX:MaxRAMPercentage=45.0", \
+  "-XX:MinRAMPercentage=20.0", \
+  "-XX:MaxMetaspaceSize=128m", \
+  "-XX:CompressedClassSpaceSize=32m", \
+  "-XX:ReservedCodeCacheSize=48m", \
+  "-XX:MaxDirectMemorySize=32m", \
+  "-Xss384k", \
+  "-Dspring.jmx.enabled=false", \
+  "-Djava.security.egd=file:/dev/./urandom", \
+  "-jar", "app.jar"]
