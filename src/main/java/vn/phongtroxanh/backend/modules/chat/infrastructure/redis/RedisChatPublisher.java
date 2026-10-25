@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
 @Slf4j
@@ -15,6 +16,7 @@ public class RedisChatPublisher {
 
     private final RedisTemplate<String, Object> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final SimpMessagingTemplate messagingTemplate;
 
     public void publish(ChatMessagePayload payload) {
         try {
@@ -22,7 +24,10 @@ public class RedisChatPublisher {
             redisTemplate.convertAndSend(CHAT_TOPIC, json);
             log.debug("Published chat message to Redis topic: {}", payload.getMessageId());
         } catch (Exception e) {
-            log.error("Failed to publish chat message to Redis: {}", e.getMessage());
+            log.warn("Failed to publish chat message to Redis, falling back to direct WebSocket delivery: {}", e.getMessage());
+            if (messagingTemplate != null && payload != null && payload.getConversationId() != null) {
+                messagingTemplate.convertAndSend("/topic/conversations." + payload.getConversationId(), payload);
+            }
         }
     }
 }
