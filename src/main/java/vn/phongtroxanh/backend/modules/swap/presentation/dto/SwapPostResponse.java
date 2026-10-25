@@ -21,6 +21,8 @@ public class SwapPostResponse {
     private UUID userId;
     private String authorName;
     private String authorAvatar;
+    private Integer authorTrustScore;
+    private String authorSchool;
     private UUID currentRoomId;
     private Boolean isLeaseholder;
     private String title;
@@ -35,6 +37,12 @@ public class SwapPostResponse {
     private LocalDate targetMoveInDate;
     private LocalDate moveInDate;
     private UUID matchedTenantId;
+    private String matchedTenantName;
+    private String matchedTenantAvatar;
+    private Integer matchedTenantTrustScore;
+    private String matchedTenantSchool;
+    private Boolean matchedTenantVerified;
+    private String proposalMessage;
     private UUID landlordId;
     private SwapStatus landlordDecision;
     private SwapStatus status;
@@ -43,6 +51,5 @@ public class SwapPostResponse {
     private String currentRoomDistrict;
     private BigDecimal currentRoomArea;
     private List<String> currentRoomImages;
-    private String authorSchool;
     private Instant createdAt;
 }
