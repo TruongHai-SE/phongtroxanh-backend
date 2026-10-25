@@ -13,4 +13,6 @@ public class UpdateUserStatusRequest {
 
     @NotNull(message = "Trạng thái người dùng không được để trống")
     private UserStatus status;
+
+    private String reason;
 }
