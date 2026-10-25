@@ -30,6 +30,7 @@ public class UserProfileResponse {
     private Boolean isVerified;
     private Boolean isOnboarded;
     private Integer trustScore;
+    private Integer strikeCount;
     private Instant createdAt;
     private Instant lastActiveAt;
 
@@ -49,6 +50,7 @@ public class UserProfileResponse {
     private List<String> preferredDistricts;
     private String preferredRoomType;
     private List<String> interests;
+    private List<String> galleryImages;
     private Boolean earlySleeper;
     private Boolean isNeat;
     private Boolean allowGuests;

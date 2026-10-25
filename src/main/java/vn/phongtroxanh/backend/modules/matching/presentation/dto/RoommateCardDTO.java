@@ -28,6 +28,7 @@ public class RoommateCardDTO {
     private BigDecimal budgetMax;
     private List<String> preferredDistricts;
     private List<String> interests;
+    private List<String> galleryImages;
 
     private Boolean earlySleeper;
     private Boolean isNeat;
@@ -36,5 +37,6 @@ public class RoommateCardDTO {
     private Integer noiseTolerance;
 
     private int compatibilityScore;
+    private Boolean isBoosted;
     private List<String> matchHighlights;
 }

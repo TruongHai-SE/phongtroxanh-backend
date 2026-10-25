@@ -16,10 +16,11 @@ public class CreateRentalRequest {
     @NotNull(message = "roomId không được để trống")
     private UUID roomId;
 
-    @NotNull(message = "Ngày bắt đầu thuê không được để trống")
+    private LocalDate viewingDate;
+
+    @NotNull(message = "Ngày dự kiến dọn vào ở không được để trống")
     private LocalDate startDate;
 
-    @NotNull(message = "Ngày kết thúc thuê không được để trống")
     private LocalDate endDate;
 
     private String message;

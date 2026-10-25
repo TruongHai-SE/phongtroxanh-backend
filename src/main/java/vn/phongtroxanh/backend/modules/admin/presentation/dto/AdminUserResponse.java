@@ -22,6 +22,7 @@ public class AdminUserResponse {
     private UserRole role;
     private UserStatus status;
     private Integer trustScore;
+    private Integer strikeCount;
     private Boolean isVerified;
     private Instant createdAt;
 }

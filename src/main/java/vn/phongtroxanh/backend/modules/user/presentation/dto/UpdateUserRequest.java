@@ -5,6 +5,7 @@ import lombok.*;
 import vn.phongtroxanh.backend.modules.user.domain.Gender;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @Getter
 @Setter
@@ -20,4 +21,6 @@ public class UpdateUserRequest {
     private Gender gender;
     private String schoolOrCompany;
     private String bio;
+    private String address;
+    private List<String> preferredDistricts;
 }

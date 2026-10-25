@@ -24,6 +24,7 @@ public class LandlordOnboardingRequest {
 
     @NotBlank(message = "Địa chỉ liên hệ không được để trống")
     private String address;
+    private String bio;
 
     // Step 2: Quy mô phòng trọ
     @NotNull(message = "Số lượng phòng dự kiến không được để trống")

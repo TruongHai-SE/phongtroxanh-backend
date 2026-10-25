@@ -55,7 +55,8 @@ public class MatchingService {
         Set<UUID> excludedIds = new HashSet<>(swipedIds);
         excludedIds.add(currentUserId);
 
-        List<User> activeTenants = userRepository.findByRoleAndStatus(UserRole.TENANT, UserStatus.ACTIVE);
+        List<User> activeTenants = new ArrayList<>(userRepository.findByRoleAndStatus(UserRole.TENANT, UserStatus.ACTIVE));
+        activeTenants.addAll(userRepository.findByRoleAndStatus(UserRole.TENANT, UserStatus.WARNED));
         List<RoommateCardDTO> feed = new ArrayList<>();
 
         for (User u : activeTenants) {
@@ -79,6 +80,7 @@ public class MatchingService {
                     .budgetMax(theirProfile.getBudgetMax())
                     .preferredDistricts(theirProfile.getPreferredDistricts())
                     .interests(theirProfile.getInterests())
+                    .galleryImages(theirProfile.getGalleryImages())
                     .earlySleeper(theirProfile.getEarlySleeper())
                     .isNeat(theirProfile.getIsNeat())
                     .allowGuests(theirProfile.getAllowGuests())
@@ -92,8 +94,10 @@ public class MatchingService {
         Set<UUID> boostedIds = new HashSet<>();
         userConsumableRepository.findByProfileBoostExpiresAtAfter(Instant.now())
                 .forEach(c -> boostedIds.add(c.getUserId()));
+        feed.forEach(c -> c.setIsBoosted(boostedIds.contains(c.getUserId())));
         feed.sort(Comparator.<RoommateCardDTO, Boolean>comparing(c -> boostedIds.contains(c.getUserId())).reversed()
-                .thenComparing(RoommateCardDTO::getCompatibilityScore, Comparator.reverseOrder()));
+                .thenComparing(RoommateCardDTO::getCompatibilityScore, Comparator.reverseOrder())
+                .thenComparing(c -> c.getTrustScore() != null ? c.getTrustScore() : 0, Comparator.reverseOrder()));
 
         return feed;
     }
@@ -120,7 +124,7 @@ public class MatchingService {
         }
 
         UserProfile targetProfile = userProfileRepository.findById(targetId).orElse(null);
-        if (targetUser.getStatus() != UserStatus.ACTIVE || targetUser.getRole() != UserRole.TENANT
+        if (targetUser.getStatus() == UserStatus.LOCKED || targetUser.getRole() != UserRole.TENANT
                 || targetProfile == null || !Boolean.TRUE.equals(targetProfile.getIsPublic())) {
             throw new BadRequestException("USER_INACTIVE", "Người dùng này hiện không còn hoạt động");
         }
@@ -253,13 +257,20 @@ public class MatchingService {
     @Transactional
     public void boostProfile() {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
+        User currentUser = userRepository.findById(currentUserId).orElse(null);
+        if (currentUser != null && currentUser.getStrikeCount() != null && currentUser.getStrikeCount() >= 2) {
+            throw new BadRequestException("BOOST_RESTRICTED", "Tài khoản đang ở mức cảnh báo vi phạm 2/3, tạm thời không thể sử dụng tính năng đẩy hồ sơ ưu tiên");
+        }
         int updated = userConsumableRepository.decrementBoostAtomic(currentUserId);
         if (updated == 0) {
             throw new BadRequestException("OUT_OF_BOOSTS", "Bạn đã hết lượt đẩy hồ sơ");
         }
         UserConsumable consumable = userConsumableRepository.findById(currentUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("BALANCE_NOT_FOUND", "Không tìm thấy số dư"));
-        consumable.setProfileBoostExpiresAt(Instant.now().plus(24, ChronoUnit.HOURS));
+        Instant now = Instant.now();
+        Instant baseBoost = (consumable.getProfileBoostExpiresAt() != null && consumable.getProfileBoostExpiresAt().isAfter(now))
+                ? consumable.getProfileBoostExpiresAt() : now;
+        consumable.setProfileBoostExpiresAt(baseBoost.plus(24, ChronoUnit.HOURS));
         userConsumableRepository.save(consumable);
         log.info("Boosted profile for user {}", currentUserId);
     }
@@ -272,7 +283,7 @@ public class MatchingService {
                 .orElseThrow(() -> new ResourceNotFoundException("PROFILE_NOT_FOUND", "Chưa có hồ sơ"));
         UserProfile theirProfile = userProfileRepository.findById(targetUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("PROFILE_NOT_FOUND", "Người dùng chưa có hồ sơ"));
-        if (targetUser.getStatus() != UserStatus.ACTIVE || targetUser.getRole() != UserRole.TENANT
+        if (targetUser.getStatus() == UserStatus.LOCKED || targetUser.getRole() != UserRole.TENANT
                 || !Boolean.TRUE.equals(theirProfile.getIsPublic())) {
             throw new ResourceNotFoundException("PROFILE_NOT_FOUND", "Không tìm thấy hồ sơ công khai");
         }
