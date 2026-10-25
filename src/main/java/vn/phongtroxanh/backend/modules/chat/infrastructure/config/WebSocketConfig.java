@@ -143,8 +143,19 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public RedisMessageListenerContainer redisMessageListenerContainer(
             RedisConnectionFactory connectionFactory,
             RedisChatSubscriber chatSubscriber) {
-        RedisMessageListenerContainer container = new RedisMessageListenerContainer();
+        RedisMessageListenerContainer container = new RedisMessageListenerContainer() {
+            @Override
+            public void start() {
+                try {
+                    super.start();
+                } catch (Exception ex) {
+                    log.warn("Redis Pub/Sub listener failed initial connect at startup (will auto-recover in background): {}", ex.getMessage());
+                }
+            }
+        };
         container.setConnectionFactory(connectionFactory);
+        container.setRecoveryInterval(10000L);
+        container.setErrorHandler(t -> log.warn("Redis Pub/Sub listener error: {}", t.getMessage()));
         container.addMessageListener(chatSubscriber, new ChannelTopic(RedisChatPublisher.CHAT_TOPIC));
         return container;
     }
