@@ -1,0 +1,5 @@
+ALTER TABLE user_profiles
+    ADD COLUMN IF NOT EXISTS gallery_images VARCHAR(500)[] DEFAULT '{}';
+
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS strike_count INTEGER NOT NULL DEFAULT 0;

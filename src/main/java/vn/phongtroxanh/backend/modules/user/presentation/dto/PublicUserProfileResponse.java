@@ -7,6 +7,7 @@ import vn.phongtroxanh.backend.modules.user.domain.UserRole;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -27,6 +28,7 @@ public class PublicUserProfileResponse {
     private Instant lastActiveAt;
 
     private String schoolOrCompany;
+    private LocalDate birthDate;
     private Gender gender;
     private String bio;
     private BigDecimal budgetMin;
@@ -34,6 +36,7 @@ public class PublicUserProfileResponse {
     private List<String> preferredDistricts;
     private String preferredRoomType;
     private List<String> interests;
+    private List<String> galleryImages;
 
     // Lifestyle snapshot
     private Boolean earlySleeper;
@@ -41,4 +44,8 @@ public class PublicUserProfileResponse {
     private Boolean allowGuests;
     private Boolean nonSmoking;
     private Integer noiseTolerance;
+    private Boolean proximitySchool;
+    private Boolean proximityWork;
+    private Boolean proximityMarket;
+    private Boolean proximityBus;
 }

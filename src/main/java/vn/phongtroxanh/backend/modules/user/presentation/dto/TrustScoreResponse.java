@@ -21,6 +21,8 @@ public class TrustScoreResponse {
     private Integer reviewScore;
     private Integer rentalDurationScore;
     private Integer responseRateScore;
+    private Integer strikeCount;
+    private Integer penaltyScore;
 
     private List<TrustScoreLogItem> history;
 
