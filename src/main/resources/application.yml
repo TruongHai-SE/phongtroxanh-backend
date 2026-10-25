@@ -2,9 +2,9 @@ server:
   port: ${PORT:${SERVER_PORT:8080}}
   tomcat:
     threads:
-      max: ${TOMCAT_MAX_THREADS:30}
-      min-spare: ${TOMCAT_MIN_SPARE_THREADS:3}
-    max-connections: 500
+      max: ${TOMCAT_MAX_THREADS:20}
+      min-spare: ${TOMCAT_MIN_SPARE_THREADS:2}
+    max-connections: 250
     accept-count: 50
   servlet:
     context-path: /
@@ -21,16 +21,18 @@ spring:
     active: ${SPRING_PROFILES_ACTIVE:dev}
 
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:phongtroxanh_db}?stringtype=unspecified
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:phongtroxanh_db}?stringtype=unspecified&tcpKeepAlive=true&connectTimeout=15&socketTimeout=60
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:postgrespassword}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: ${DB_POOL_MAX_SIZE:5}
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:3}
       minimum-idle: ${DB_POOL_MIN_IDLE:1}
-      idle-timeout: 120000
-      max-lifetime: 600000
-      connection-timeout: 20000
+      idle-timeout: 60000
+      keepalive-time: 30000
+      max-lifetime: 240000
+      validation-timeout: 5000
+      connection-timeout: 30000
 
   flyway:
     enabled: true
@@ -58,7 +60,8 @@ spring:
       password: ${REDIS_PASSWORD:}
       ssl:
         enabled: ${REDIS_SSL:false}
-      timeout: 3000ms
+      timeout: 15000ms
+      connect-timeout: 15000ms
 
   servlet:
     multipart:

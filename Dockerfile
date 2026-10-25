@@ -28,17 +28,16 @@ COPY --from=build --chown=appuser:appgroup /app/target/*.jar app.jar
 ENV PORT=8080
 EXPOSE 8080
 
-# Optimize JVM memory & CPU limits for Render 512MB RAM / fractional CPU tier
+# Optimize JVM memory & CPU for Render Free 512MB RAM / 0.1 CPU tier:
+# Budget: 256MB Heap + 128MB Metaspace + ~20MB C1 CodeCache + ~50MB Native/Netty = ~454MB (< 512MB hard limit)
 ENTRYPOINT ["java", \
   "-XX:+UseContainerSupport", \
-  "-XX:+UseSerialGC", \
-  "-XX:MaxRAMPercentage=45.0", \
-  "-XX:MinRAMPercentage=20.0", \
+  "-Xms128m", \
+  "-Xmx256m", \
   "-XX:MaxMetaspaceSize=128m", \
-  "-XX:CompressedClassSpaceSize=32m", \
-  "-XX:ReservedCodeCacheSize=48m", \
-  "-XX:MaxDirectMemorySize=32m", \
-  "-Xss384k", \
+  "-XX:TieredStopAtLevel=1", \
+  "-XX:+UseSerialGC", \
+  "-Djava.net.preferIPv4Stack=true", \
   "-Dspring.jmx.enabled=false", \
   "-Djava.security.egd=file:/dev/./urandom", \
   "-jar", "app.jar"]
