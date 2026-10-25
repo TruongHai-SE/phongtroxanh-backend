@@ -12,6 +12,8 @@ import vn.phongtroxanh.backend.common.exception.ConflictException;
 import vn.phongtroxanh.backend.common.exception.ForbiddenException;
 import vn.phongtroxanh.backend.common.exception.ResourceNotFoundException;
 import vn.phongtroxanh.backend.common.security.SecurityUtils;
+import vn.phongtroxanh.backend.modules.notification.application.service.NotificationService;
+import vn.phongtroxanh.backend.modules.notification.domain.NotificationType;
 import vn.phongtroxanh.backend.modules.rental.domain.Rental;
 import vn.phongtroxanh.backend.modules.rental.domain.RentalStatus;
 import vn.phongtroxanh.backend.modules.rental.infrastructure.repository.RentalRepository;
@@ -21,12 +23,12 @@ import vn.phongtroxanh.backend.modules.room.domain.RoomStatus;
 import vn.phongtroxanh.backend.modules.room.infrastructure.repository.RoomRepository;
 import vn.phongtroxanh.backend.modules.user.domain.TrustScoreLog;
 import vn.phongtroxanh.backend.modules.user.domain.User;
+import vn.phongtroxanh.backend.modules.user.domain.UserProfile;
 import vn.phongtroxanh.backend.modules.user.domain.UserRole;
 import vn.phongtroxanh.backend.modules.user.domain.UserStatus;
 import vn.phongtroxanh.backend.modules.user.infrastructure.repository.TrustScoreLogRepository;
+import vn.phongtroxanh.backend.modules.user.infrastructure.repository.UserProfileRepository;
 import vn.phongtroxanh.backend.modules.user.infrastructure.repository.UserRepository;
-import vn.phongtroxanh.backend.modules.notification.application.service.NotificationService;
-import vn.phongtroxanh.backend.modules.notification.domain.NotificationType;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -44,6 +46,7 @@ public class RentalService {
     private final RentalRepository rentalRepository;
     private final RoomRepository roomRepository;
     private final UserRepository userRepository;
+    private final UserProfileRepository userProfileRepository;
     private final TrustScoreLogRepository trustScoreLogRepository;
     private final RedisTemplate<String, Object> redisTemplate;
     private final EntityManager entityManager;
@@ -53,14 +56,20 @@ public class RentalService {
     public RentalResponse createRental(CreateRentalRequest request) {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
 
-        if (request.getStartDate() == null || request.getEndDate() == null
-                || request.getStartDate().isBefore(LocalDate.now())
-                || !request.getEndDate().isAfter(request.getStartDate())) {
-            throw new BadRequestException("INVALID_RENTAL_DATES", "Ngày thuê phải từ hôm nay và ngày kết thúc phải sau ngày bắt đầu");
+        if (request.getStartDate() == null || request.getStartDate().isBefore(LocalDate.now())) {
+            throw new BadRequestException("INVALID_RENTAL_DATES", "Ngày dự kiến dọn vào ở phải từ hôm nay trở đi");
+        }
+        LocalDate viewingDate = request.getViewingDate() != null
+                ? request.getViewingDate()
+                : (request.getEndDate() != null && !request.getEndDate().isAfter(request.getStartDate())
+                        ? request.getEndDate()
+                        : request.getStartDate());
+        if (viewingDate.isBefore(LocalDate.now()) || viewingDate.isAfter(request.getStartDate())) {
+            throw new BadRequestException("INVALID_VIEWING_DATE", "Ngày hẹn gặp xem phòng phải từ hôm nay trở đi và không được sau ngày dự kiến dọn vào ở");
         }
         User tenant = requireActiveUser(currentUserId);
         if (tenant.getRole() != UserRole.TENANT && tenant.getRole() != UserRole.ADMIN) {
-            throw new ForbiddenException("TENANT_REQUIRED", "Chỉ người thuê mới có thể gửi yêu cầu thuê phòng");
+            throw new ForbiddenException("TENANT_REQUIRED", "Chỉ tài khoản người thuê mới có thể gửi yêu cầu thuê phòng");
         }
 
         Room room = roomRepository.findById(request.getRoomId())
@@ -68,23 +77,35 @@ public class RentalService {
         entityManager.refresh(room, LockModeType.PESSIMISTIC_WRITE);
 
         if (room.getStatus() != RoomStatus.AVAILABLE || (room.getExpiresAt() != null && !room.getExpiresAt().isAfter(Instant.now()))) {
-            throw new BadRequestException("ROOM_NOT_AVAILABLE", "Phòng này hiện không còn trống");
+            throw new BadRequestException("ROOM_NOT_AVAILABLE", "Phòng này hiện không còn trống hoặc đã hết hạn đăng tin");
         }
 
         if (room.getLandlordId().equals(currentUserId)) {
-            throw new BadRequestException("SELF_RENTAL_NOT_ALLOWED", "Bạn không thể thuê phòng của chính mình");
+            throw new BadRequestException("SELF_RENTAL_NOT_ALLOWED", "Bạn không thể tự đăng ký thuê phòng của chính mình");
         }
         if (requireActiveUser(room.getLandlordId()).getRole() != UserRole.LANDLORD) {
             throw new BadRequestException("INVALID_LANDLORD", "Chủ phòng không có quyền cho thuê");
         }
 
-        List<Rental> pendingRentals = rentalRepository.findByRoomIdAndStatus(room.getId(), RentalStatus.PENDING_CHECKIN);
-        if (!pendingRentals.isEmpty()) {
-            throw new ConflictException("ROOM_ALREADY_RESERVED", "Phòng này đã có hợp đồng đang chờ nhận phòng");
-        }
         List<Rental> activeRentals = rentalRepository.findByRoomIdAndStatus(room.getId(), RentalStatus.CHECKED_IN);
         if (!activeRentals.isEmpty()) {
-            throw new ConflictException("ROOM_ALREADY_RENTED", "Phòng này hiện đang có người thuê");
+            throw new ConflictException("ROOM_ALREADY_RENTED", "Phòng này hiện đang có người thuê thực tế");
+        }
+
+        List<Rental> pendingRentals = rentalRepository.findByRoomIdAndStatus(room.getId(), RentalStatus.PENDING_CHECKIN);
+        if (!pendingRentals.isEmpty()) {
+            Rental existingPending = pendingRentals.get(0);
+            if (existingPending.getTenantId().equals(currentUserId)) {
+                throw new ConflictException("DUPLICATE_RENTAL_REQUEST", "Bạn đã gửi yêu cầu thuê cho phòng này rồi. Vui lòng kiểm tra trong mục 'Phòng của tôi'.");
+            }
+            throw new ConflictException("ROOM_ALREADY_RESERVED", "Phòng này đang có yêu cầu thuê chờ chủ trọ xử lý. Bạn có thể nhắn tin trực tiếp với chủ trọ.");
+        }
+
+        String cleanMessage = (request.getMessage() != null && !request.getMessage().trim().isEmpty())
+                ? request.getMessage().trim()
+                : null;
+        if (cleanMessage != null && cleanMessage.length() > 240) {
+            cleanMessage = cleanMessage.substring(0, 240);
         }
 
         Rental rental = Rental.builder()
@@ -92,18 +113,116 @@ public class RentalService {
                 .tenantId(currentUserId)
                 .landlordId(room.getLandlordId())
                 .startDate(request.getStartDate())
-                .endDate(request.getEndDate())
+                .endDate(viewingDate)
                 .monthlyRent(room.getPrice())
                 .depositAmount(room.getDepositAmount())
                 .status(RentalStatus.PENDING_CHECKIN)
+                .checkInCode(null)
+                .checkInQrToken(cleanMessage)
                 .isLeaseholder(true)
                 .build();
 
         rental = rentalRepository.save(rental);
-        notificationService.create(rental.getLandlordId(), "Yêu cầu thuê phòng mới", "Có người thuê gửi yêu cầu thuê phòng của bạn",
-                NotificationType.SYSTEM, Map.of("rentalId", rental.getId()));
-        log.info("Created rental contract {} for tenant {} and room {}", rental.getId(), currentUserId, room.getId());
+        notificationService.create(
+                rental.getLandlordId(),
+                "Yêu cầu xem & thuê phòng từ " + tenant.getFullName(),
+                tenant.getFullName() + " hẹn gặp xem phòng '" + room.getTitle() + "' ngày " + viewingDate + " (Dự kiến dọn vào ở: " + request.getStartDate() + "). Hãy xem hồ sơ và duyệt yêu cầu.",
+                NotificationType.SYSTEM,
+                Map.of("rentalId", rental.getId(), "roomId", room.getId(), "tenantId", currentUserId)
+        );
+        log.info("Created rental request {} for tenant {} and room {}", rental.getId(), currentUserId, room.getId());
 
+        return mapToResponse(rental, room);
+    }
+
+    @Transactional
+    public RentalResponse approveRental(UUID rentalId) {
+        UUID currentUserId = SecurityUtils.getCurrentUserId();
+        Rental rental = rentalRepository.findById(rentalId)
+                .orElseThrow(() -> new ResourceNotFoundException("RENTAL_NOT_FOUND", "Yêu cầu không tồn tại"));
+        entityManager.refresh(rental, LockModeType.PESSIMISTIC_WRITE);
+
+        if (!rental.getLandlordId().equals(currentUserId) && !SecurityUtils.hasRole("ROLE_ADMIN")) {
+            throw new ForbiddenException("BOLA_FORBIDDEN", "Chỉ chủ trọ của phòng này mới có quyền duyệt yêu cầu");
+        }
+
+        if (rental.getStatus() != RentalStatus.PENDING_CHECKIN) {
+            throw new BadRequestException("INVALID_RENTAL_STATUS", "Yêu cầu không ở trạng thái chờ duyệt");
+        }
+
+        Room room = roomRepository.findById(rental.getRoomId())
+                .orElseThrow(() -> new ResourceNotFoundException("ROOM_NOT_FOUND", "Không tìm thấy phòng trọ"));
+
+        rental.setCheckInCode("APPROVED");
+        rental = rentalRepository.save(rental);
+
+        notificationService.create(
+                rental.getTenantId(),
+                "Chủ trọ đã duyệt yêu cầu xem & thuê phòng!",
+                "Chủ trọ đã duyệt lịch hẹn xem & thuê phòng '" + room.getTitle() + "' (Dự kiến vào ở: " + rental.getStartDate() + "). Vui lòng vào mục 'Phòng của tôi' để xem chi tiết.",
+                NotificationType.SYSTEM,
+                Map.of("rentalId", rental.getId(), "roomId", room.getId())
+        );
+        log.info("Landlord {} approved rental request {}", currentUserId, rentalId);
+        return mapToResponse(rental, room);
+    }
+
+    @Transactional
+    public RentalResponse cancelRentalRequest(UUID rentalId, String reason) {
+        UUID currentUserId = SecurityUtils.getCurrentUserId();
+        Rental rental = rentalRepository.findById(rentalId)
+                .orElseThrow(() -> new ResourceNotFoundException("RENTAL_NOT_FOUND", "Yêu cầu thuê không tồn tại"));
+        entityManager.refresh(rental, LockModeType.PESSIMISTIC_WRITE);
+
+        boolean isLandlord = rental.getLandlordId().equals(currentUserId);
+        boolean isTenant = rental.getTenantId().equals(currentUserId);
+        if (!isLandlord && !isTenant && !SecurityUtils.hasRole("ROLE_ADMIN")) {
+            throw new ForbiddenException("BOLA_FORBIDDEN", "Bạn không có quyền hủy yêu cầu thuê này");
+        }
+
+        if (rental.getStatus() == RentalStatus.CHECKED_IN) {
+            throw new BadRequestException("ALREADY_CHECKED_IN", "Hợp đồng đã nhận phòng và đang có hiệu lực, không thể hủy ngang như yêu cầu chờ duyệt. Vui lòng sử dụng chức năng Thanh lý hợp đồng.");
+        }
+        if (rental.getStatus() == RentalStatus.TERMINATED || rental.getStatus() == RentalStatus.CANCELLED) {
+            throw new BadRequestException("ALREADY_CANCELLED", "Yêu cầu thuê này đã được đóng trước đó");
+        }
+
+        Room room = roomRepository.findById(rental.getRoomId()).orElse(null);
+        String roomTitle = room != null ? room.getTitle() : "Phòng trọ";
+        String cleanReason = (reason != null && !reason.trim().isEmpty())
+                ? reason.trim()
+                : (isLandlord ? "Chủ trọ từ chối yêu cầu thuê (ngày vào ở hoặc điều kiện chưa phù hợp)" : "Người thuê chủ động rút yêu cầu thuê phòng");
+        if (cleanReason.length() > 230) {
+            cleanReason = cleanReason.substring(0, 230);
+        }
+
+        rental.setStatus(RentalStatus.CANCELLED);
+        rental.setCheckInCode("CANCELLED");
+        rental.setCheckInQrToken("[Đã hủy/Từ chối]: " + cleanReason);
+        rentalRepository.save(rental);
+
+        redisTemplate.delete("rental:checkin:" + rentalId);
+        redisTemplate.delete("rental:checkin:manual:" + rentalId);
+
+        if (isLandlord) {
+            notificationService.create(
+                    rental.getTenantId(),
+                    "Phản hồi yêu cầu thuê phòng '" + roomTitle + "'",
+                    "Chủ trọ chưa thể duyệt yêu cầu thuê của bạn. Lý do: " + cleanReason,
+                    NotificationType.SYSTEM,
+                    Map.of("rentalId", rentalId)
+            );
+        } else {
+            notificationService.create(
+                    rental.getLandlordId(),
+                    "Người thuê đã rút yêu cầu thuê phòng",
+                    "Người thuê đã hủy yêu cầu thuê phòng '" + roomTitle + "'. Lý do: " + cleanReason,
+                    NotificationType.SYSTEM,
+                    Map.of("rentalId", rentalId)
+            );
+        }
+
+        log.info("Cancelled pending rental request {} by user {}", rentalId, currentUserId);
         return mapToResponse(rental, room);
     }
 
@@ -183,9 +302,17 @@ public class RentalService {
             throw new BadRequestException("INVALID_RENTAL_STATUS", "Hợp đồng không ở trạng thái chờ nhận phòng");
         }
 
-        // Only landlord or admin can verify check-in
-        if (!rental.getLandlordId().equals(currentUserId) && !SecurityUtils.hasRole("ROLE_ADMIN")) {
-            throw new ForbiddenException("BOLA_FORBIDDEN", "Chỉ chủ trọ mới có quyền xác nhận bàn giao nhận phòng");
+        boolean isLandlord = rental.getLandlordId().equals(currentUserId);
+        boolean isTenant = rental.getTenantId().equals(currentUserId);
+        boolean isAdmin = SecurityUtils.hasRole("ROLE_ADMIN");
+
+        if (!isLandlord && !isTenant && !isAdmin) {
+            throw new ForbiddenException("BOLA_FORBIDDEN", "Chỉ chủ trọ hoặc người thuê của hợp đồng này mới có quyền xác nhận bàn giao phòng");
+        }
+
+        // Nếu người thuê bấm xác nhận nhận phòng, bắt buộc Chủ trọ phải đã Duyệt yêu cầu ("APPROVED") trước đó
+        if (isTenant && !isLandlord && !isAdmin && !"APPROVED".equalsIgnoreCase(rental.getCheckInCode())) {
+            throw new BadRequestException("LANDLORD_APPROVAL_REQUIRED", "Chủ trọ chưa duyệt yêu cầu thuê phòng này. Vui lòng chờ chủ trọ duyệt hồ sơ và ngày vào ở trước khi xác nhận nhận phòng.");
         }
 
         String inputCode = request.getCheckInCode() != null ? request.getCheckInCode().trim().toUpperCase() : "";
@@ -196,7 +323,6 @@ public class RentalService {
         String redisKey = "rental:checkin:" + rentalId;
         String redisManualKey = "rental:checkin:manual:" + rentalId;
 
-        // Support both direct 1-click confirmation ("CONFIRM", "HANDOVER") and dynamic code matching
         boolean isDirectHandover = inputCode.equals("CONFIRM") || inputCode.equals("HANDOVER");
         if (!isDirectHandover) {
             Object cachedCode = redisTemplate.opsForValue().get(redisKey);
@@ -206,7 +332,7 @@ public class RentalService {
             boolean matchesManual = cachedManualCode != null && cachedManualCode.toString().equalsIgnoreCase(inputCode);
 
             if (!matchesQr && !matchesManual) {
-                throw new BadRequestException("INVALID_QR_CODE", "Mã xác nhận Check-in không hợp lệ");
+                throw new BadRequestException("INVALID_QR_CODE", "Mã xác nhận Check-in không hợp lệ hoặc đã hết hạn");
             }
         }
 
@@ -220,25 +346,37 @@ public class RentalService {
         requireActiveUser(rental.getTenantId());
         requireActiveUser(rental.getLandlordId());
 
-        // Invalidate temporary code on Redis and mark used in DB
         redisTemplate.delete(redisKey);
         redisTemplate.delete(redisManualKey);
-        rental.setCheckInCode(null);
-        rental.setCheckInQrToken(null);
+        rental.setCheckInCode("CHECKED_IN");
 
         rental.setStatus(RentalStatus.CHECKED_IN);
         rental.setCheckedInAt(Instant.now());
         rentalRepository.save(rental);
 
-        // Update room status to RENTED
         room.setStatus(RoomStatus.RENTED);
         roomRepository.save(room);
 
-        // TrustScore Bonus (+10 points for check-in)
         updateTrustScoreBonus(rental.getTenantId(), 10, "Nhận phòng thành công");
         updateTrustScoreBonus(rental.getLandlordId(), 10, "Bàn giao phòng thành công");
-        notificationService.create(rental.getTenantId(), "Nhận phòng thành công", "Chủ trọ đã xác nhận bàn giao phòng",
-                NotificationType.SYSTEM, Map.of("rentalId", rentalId));
+
+        if (isLandlord) {
+            notificationService.create(
+                    rental.getTenantId(),
+                    "Bàn giao & Nhận phòng thành công (+10 TrustScore)",
+                    "Chủ trọ đã xác nhận bàn giao phòng '" + room.getTitle() + "'. Hợp đồng thuê chính thức có hiệu lực!",
+                    NotificationType.SYSTEM,
+                    Map.of("rentalId", rentalId, "roomId", room.getId())
+            );
+        } else {
+            notificationService.create(
+                    rental.getLandlordId(),
+                    "Người thuê đã xác nhận nhận phòng (+10 TrustScore)",
+                    "Người thuê đã xác nhận nhận bàn giao phòng '" + room.getTitle() + "'. Hợp đồng thuê chính thức có hiệu lực!",
+                    NotificationType.SYSTEM,
+                    Map.of("rentalId", rentalId, "roomId", room.getId())
+            );
+        }
 
         log.info("Check-in verified successfully for rental {}", rentalId);
         return mapToResponse(rental, room);
@@ -246,13 +384,22 @@ public class RentalService {
 
     @Transactional
     public RentalResponse terminateRental(UUID rentalId) {
+        return terminateRental(rentalId, null, null);
+    }
+
+    @Transactional
+    public RentalResponse terminateRental(UUID rentalId, String reason, String terminationType) {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
         Rental rental = rentalRepository.findById(rentalId)
                 .orElseThrow(() -> new ResourceNotFoundException("RENTAL_NOT_FOUND", "Hợp đồng không tồn tại"));
         entityManager.refresh(rental, LockModeType.PESSIMISTIC_WRITE);
 
-        if (!rental.getLandlordId().equals(currentUserId) && !SecurityUtils.hasRole("ROLE_ADMIN")) {
-            throw new ForbiddenException("BOLA_FORBIDDEN", "Chỉ chủ trọ hoặc Quản trị viên mới có quyền kết thúc hợp đồng");
+        boolean isLandlord = rental.getLandlordId().equals(currentUserId);
+        boolean isTenant = rental.getTenantId().equals(currentUserId);
+        boolean isAdmin = SecurityUtils.hasRole("ROLE_ADMIN");
+
+        if (!isLandlord && !isTenant && !isAdmin) {
+            throw new ForbiddenException("BOLA_FORBIDDEN", "Chỉ các bên trong hợp đồng hoặc Quản trị viên mới có quyền thanh lý hợp đồng");
         }
 
         if (rental.getStatus() == RentalStatus.TERMINATED || rental.getStatus() == RentalStatus.CANCELLED) {
@@ -260,25 +407,61 @@ public class RentalService {
         }
 
         boolean checkedIn = rental.getStatus() == RentalStatus.CHECKED_IN;
-        rental.setStatus(checkedIn ? RentalStatus.TERMINATED : RentalStatus.CANCELLED);
-        rental.setCheckInCode(null);
-        rental.setCheckInQrToken(null);
+        if (!checkedIn) {
+            return cancelRentalRequest(rentalId, reason);
+        }
+
+        String safeReason = (reason != null && !reason.trim().isEmpty())
+                ? reason.trim()
+                : "Hai bên thỏa thuận thanh lý hợp đồng và hoàn trả cọc đầy đủ";
+        if (safeReason.length() > 210) {
+            safeReason = safeReason.substring(0, 210);
+        }
+
+        boolean isEarlyUnilateralByLandlord = isLandlord
+                && "EARLY_LANDLORD".equalsIgnoreCase(terminationType);
+
+        rental.setStatus(RentalStatus.TERMINATED);
+        rental.setCheckInCode("TERMINATED");
+        rental.setCheckInQrToken("[Biên bản thanh lý]: " + safeReason);
         rentalRepository.save(rental);
+
         redisTemplate.delete("rental:checkin:" + rentalId);
         redisTemplate.delete("rental:checkin:manual:" + rentalId);
 
         Room room = roomRepository.findById(rental.getRoomId()).orElse(null);
         if (room != null) {
             entityManager.refresh(room, LockModeType.PESSIMISTIC_WRITE);
-            if (checkedIn && room.getStatus() == RoomStatus.RENTED) {
+            if (room.getStatus() == RoomStatus.RENTED) {
                 room.setStatus(RoomStatus.AVAILABLE);
                 roomRepository.save(room);
             }
         }
 
-        log.info("Terminated rental {} and released room", rentalId);
-        notificationService.create(rental.getTenantId(), checkedIn ? "Hợp đồng đã kết thúc" : "Yêu cầu thuê đã hủy",
-                "Chủ trọ đã cập nhật trạng thái hợp đồng thuê phòng", NotificationType.SYSTEM, Map.of("rentalId", rentalId));
+        if (isEarlyUnilateralByLandlord) {
+            updateTrustScoreBonus(rental.getLandlordId(), -15, "Chủ trọ đơn phương chấm dứt hợp đồng trước hạn");
+        }
+
+        String roomTitle = room != null ? room.getTitle() : "Phòng trọ";
+        if (isLandlord) {
+            notificationService.create(
+                    rental.getTenantId(),
+                    "Biên bản thanh lý hợp đồng phòng '" + roomTitle + "'",
+                    "Chủ trọ đã ghi nhận thanh lý hợp đồng (" + safeReason + "). Toàn bộ thông tin chủ trọ và biên bản đặt cọc vẫn được lưu trữ bảo vệ trong mục 'Phòng của tôi'.",
+                    NotificationType.SYSTEM,
+                    Map.of("rentalId", rentalId)
+            );
+        } else {
+            notificationService.create(
+                    rental.getLandlordId(),
+                    "Người thuê đã xác nhận trả phòng '" + roomTitle + "'",
+                    "Người thuê đã gửi biên bản trả phòng & thanh lý hợp đồng (" + safeReason + "). Phòng đã được mở lại trạng thái Còn trống.",
+                    NotificationType.SYSTEM,
+                    Map.of("rentalId", rentalId)
+            );
+        }
+
+        log.info("Terminated rental {} and released room (reason={})", rentalId, safeReason);
         return mapToResponse(rental, room);
     }
 
@@ -293,8 +476,8 @@ public class RentalService {
 
     private void updateTrustScoreBonus(UUID userId, int bonus, String reason) {
         userRepository.findById(userId).ifPresent(user -> {
-            int oldScore = user.getTrustScore();
-            int newScore = Math.min(100, oldScore + bonus);
+            int oldScore = user.getTrustScore() != null ? user.getTrustScore() : 50;
+            int newScore = Math.max(0, Math.min(100, oldScore + bonus));
             user.setTrustScore(newScore);
             userRepository.save(user);
 
@@ -315,6 +498,9 @@ public class RentalService {
 
     private RentalResponse mapToResponse(Rental rental, Room room) {
         User tenant = userRepository.findById(rental.getTenantId()).orElse(null);
+        UserProfile tenantProfile = userProfileRepository != null
+                ? userProfileRepository.findById(rental.getTenantId()).orElse(null)
+                : null;
         User landlord = userRepository.findById(rental.getLandlordId()).orElse(null);
 
         BigDecimal price = rental.getMonthlyRent() != null ? rental.getMonthlyRent()
@@ -322,25 +508,68 @@ public class RentalService {
         BigDecimal deposit = rental.getDepositAmount() != null ? rental.getDepositAmount()
                 : (room != null ? room.getDepositAmount() : BigDecimal.ZERO);
 
+        String approvalStatus;
+        if (rental.getStatus() == RentalStatus.CHECKED_IN) {
+            approvalStatus = "CHECKED_IN";
+        } else if (rental.getStatus() == RentalStatus.TERMINATED) {
+            approvalStatus = "TERMINATED";
+        } else if (rental.getStatus() == RentalStatus.CANCELLED) {
+            approvalStatus = "CANCELLED";
+        } else if ("APPROVED".equalsIgnoreCase(rental.getCheckInCode())) {
+            approvalStatus = "APPROVED";
+        } else {
+            approvalStatus = "PENDING_APPROVAL";
+        }
+
+        Integer birthYear = (tenantProfile != null && tenantProfile.getBirthDate() != null)
+                ? tenantProfile.getBirthDate().getYear()
+                : null;
+        String gender = (tenantProfile != null && tenantProfile.getGender() != null)
+                ? tenantProfile.getGender().name()
+                : null;
+
+        LocalDate viewingDate = (rental.getEndDate() != null
+                && rental.getStartDate() != null
+                && !rental.getEndDate().isAfter(rental.getStartDate()))
+                ? rental.getEndDate()
+                : rental.getStartDate();
+
+        String tenantMessage = (rental.getCheckInQrToken() != null && !rental.getCheckInQrToken().isBlank())
+                ? rental.getCheckInQrToken()
+                : "Em muốn đăng ký thuê phòng này, mong anh/chị xem hồ sơ và duyệt giúp em ạ.";
+
         return RentalResponse.builder()
                 .id(rental.getId())
                 .roomId(rental.getRoomId())
                 .roomTitle(room != null ? room.getTitle() : "Phòng trọ")
                 .roomAddress(room != null ? room.getAddressStreet() + ", " + room.getDistrict() : null)
+                .roomDistrict(room != null ? room.getDistrict() : null)
                 .tenantId(rental.getTenantId())
                 .tenantName(tenant != null ? tenant.getFullName() : "Người thuê")
                 .tenantPhone(tenant != null ? tenant.getPhoneNumber() : null)
+                .tenantEmail(tenant != null ? tenant.getEmail() : null)
                 .tenantAvatar(tenant != null ? tenant.getAvatarUrl() : null)
                 .tenantTrustScore(tenant != null && tenant.getTrustScore() != null ? tenant.getTrustScore() : 50)
                 .tenantVerified(tenant != null && Boolean.TRUE.equals(tenant.getIsVerified()))
+                .tenantSchool(tenantProfile != null ? tenantProfile.getSchoolOrCompany() : null)
+                .tenantGender(gender)
+                .tenantBirthYear(birthYear)
+                .tenantBio(tenantProfile != null ? tenantProfile.getBio() : null)
+                .tenantMessage(tenantMessage)
                 .landlordId(rental.getLandlordId())
                 .landlordName(landlord != null ? landlord.getFullName() : "Chủ trọ")
                 .landlordPhone(landlord != null ? landlord.getPhoneNumber() : null)
+                .landlordEmail(landlord != null ? landlord.getEmail() : null)
+                .landlordAvatar(landlord != null ? landlord.getAvatarUrl() : null)
+                .landlordTrustScore(landlord != null && landlord.getTrustScore() != null ? landlord.getTrustScore() : 50)
+                .landlordVerified(landlord != null && Boolean.TRUE.equals(landlord.getIsVerified()))
+                .viewingDate(viewingDate)
                 .startDate(rental.getStartDate())
                 .endDate(rental.getEndDate())
                 .monthlyRent(price)
                 .depositAmount(deposit)
                 .status(rental.getStatus())
+                .approvalStatus(approvalStatus)
                 .checkInAt(rental.getCheckedInAt())
                 .createdAt(rental.getCreatedAt())
                 .build();

@@ -50,6 +50,10 @@ public class User extends BaseEntity {
     @Builder.Default
     private Integer trustScore = 50;
 
+    @Column(name = "strike_count", nullable = false)
+    @Builder.Default
+    private Integer strikeCount = 0;
+
     @Column(name = "last_active_at")
     @Builder.Default
     private Instant lastActiveAt = Instant.now();

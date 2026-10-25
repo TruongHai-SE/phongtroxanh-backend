@@ -13,6 +13,7 @@ import vn.phongtroxanh.backend.common.dto.ApiResponse;
 import vn.phongtroxanh.backend.modules.user.application.service.UserService;
 import vn.phongtroxanh.backend.modules.user.presentation.dto.*;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -41,6 +42,20 @@ public class UserController {
     public ResponseEntity<ApiResponse<Map<String, String>>> uploadAvatar(@RequestParam("file") MultipartFile file) {
         String url = userService.uploadAvatar(file);
         return ResponseEntity.ok(ApiResponse.ok("Tải lên ảnh đại diện thành công", Map.of("avatarUrl", url)));
+    }
+
+    @PostMapping(value = "/me/gallery", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Tải lên ảnh vào bộ ảnh cá nhân", description = "Tải lên tối đa 6 ảnh giới thiệu cá nhân lưu trên Cloudinary")
+    public ResponseEntity<ApiResponse<Map<String, List<String>>>> uploadGalleryImage(@RequestParam("file") MultipartFile file) {
+        List<String> images = userService.uploadGalleryImage(file);
+        return ResponseEntity.ok(ApiResponse.ok("Đã thêm ảnh vào hồ sơ", Map.of("galleryImages", images)));
+    }
+
+    @DeleteMapping("/me/gallery")
+    @Operation(summary = "Xóa ảnh khỏi bộ ảnh cá nhân", description = "Xóa 1 ảnh khỏi bộ ảnh cá nhân và xóa trên Cloudinary")
+    public ResponseEntity<ApiResponse<Map<String, List<String>>>> deleteGalleryImage(@RequestParam("imageUrl") String imageUrl) {
+        List<String> images = userService.deleteGalleryImage(imageUrl);
+        return ResponseEntity.ok(ApiResponse.ok("Đã xóa ảnh khỏi hồ sơ", Map.of("galleryImages", images)));
     }
 
     @GetMapping("/me/matching-profile")

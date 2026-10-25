@@ -43,7 +43,7 @@ public class Rental {
     @Column(name = "check_in_code", length = 16)
     private String checkInCode;
 
-    @Column(name = "check_in_qr_token", length = 255, unique = true)
+    @Column(name = "check_in_qr_token", length = 255)
     private String checkInQrToken;
 
     @Column(name = "start_date")

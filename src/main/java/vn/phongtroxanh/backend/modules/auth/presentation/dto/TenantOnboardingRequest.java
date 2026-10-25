@@ -32,6 +32,7 @@ public class TenantOnboardingRequest {
 
     @NotNull(message = "Giới tính không được để trống")
     private Gender gender;
+    private String bio;
 
     // Step 2: Sở thích
     @NotEmpty(message = "Vui lòng chọn ít nhất 3 sở thích")

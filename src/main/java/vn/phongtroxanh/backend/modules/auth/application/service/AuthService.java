@@ -20,6 +20,7 @@ import vn.phongtroxanh.backend.common.security.JwtTokenProvider;
 import vn.phongtroxanh.backend.common.security.SecurityUtils;
 import vn.phongtroxanh.backend.modules.auth.presentation.dto.*;
 import vn.phongtroxanh.backend.common.mail.EmailNotificationPort;
+import vn.phongtroxanh.backend.modules.user.application.service.UserService;
 import vn.phongtroxanh.backend.modules.user.domain.*;
 import vn.phongtroxanh.backend.modules.user.infrastructure.repository.*;
 import vn.phongtroxanh.backend.modules.user.presentation.dto.UserProfileResponse;
@@ -90,6 +91,8 @@ public class AuthService {
                 .hideActiveStatus(false)
                 .build();
         userProfileRepository.save(profile);
+        user.setTrustScore(UserService.computeProfileBaseTrustScore(user, profile));
+        userRepository.save(user);
 
         UserConsumable consumable = UserConsumable.builder()
                 .userId(user.getId())
@@ -263,15 +266,28 @@ public class AuthService {
         entityManager.refresh(user, LockModeType.PESSIMISTIC_WRITE);
         assertActive(user);
         assertCredentialVersion(refreshToken, userId);
-        Object sessionData = redisTemplate.opsForValue().getAndDelete(sessionKey);
-        if (!(sessionData instanceof Map<?, ?> session) || !userId.toString().equals(session.get("userId"))) {
-            cookieUtils.deleteRefreshTokenCookie(response);
-            throw new UnauthorizedException("SESSION_EXPIRED", "Phiên đăng nhập đã bị thu hồi hoặc hết hạn");
-        }
-
+        String graceKey = "auth:refresh-grace:" + sessionId;
         UserProfile profile = userProfileRepository.findById(user.getId()).orElse(null);
         resetDailySwipes(user.getId());
         UserConsumable consumable = userConsumableRepository.findById(user.getId()).orElse(null);
+
+        Object sessionData = redisTemplate.opsForValue().getAndDelete(sessionKey);
+        if (!(sessionData instanceof Map<?, ?> session) || !userId.toString().equals(session.get("userId"))) {
+            Object graceData = redisTemplate.opsForValue().get(graceKey);
+            if (graceData instanceof Map<?, ?> graceMap && userId.toString().equals(graceMap.get("userId"))) {
+                String cachedAccess = String.valueOf(graceMap.get("accessToken"));
+                String cachedRefresh = String.valueOf(graceMap.get("refreshToken"));
+                cookieUtils.addRefreshTokenCookie(response, cachedRefresh, tokenProvider.getRefreshExpirationMs());
+                return AuthResponse.builder()
+                        .accessToken(cachedAccess)
+                        .tokenType("Bearer")
+                        .expiresIn(tokenProvider.getAccessExpirationMs() / 1000)
+                        .user(mapToProfileResponse(user, profile, consumable))
+                        .build();
+            }
+            cookieUtils.deleteRefreshTokenCookie(response);
+            throw new UnauthorizedException("SESSION_EXPIRED", "Phiên đăng nhập đã bị thu hồi hoặc hết hạn");
+        }
 
         // Generate new session and tokens
         String newSessionId = UUID.randomUUID().toString();
@@ -279,6 +295,16 @@ public class AuthService {
         String newRefreshToken = refreshToken(user, newSessionId);
 
         storeSessionInRedis(newSessionId, user.getId(), "Rotated_Device");
+        redisTemplate.opsForValue().set(
+                graceKey,
+                Map.of(
+                        "userId", userId.toString(),
+                        "accessToken", newAccessToken,
+                        "refreshToken", newRefreshToken
+                ),
+                30,
+                TimeUnit.SECONDS
+        );
         cookieUtils.addRefreshTokenCookie(response, newRefreshToken, tokenProvider.getRefreshExpirationMs());
 
         return AuthResponse.builder()
@@ -307,6 +333,7 @@ public class AuthService {
             String sessionId = tokenProvider.extractSessionId(refreshToken);
             if (sessionId != null) {
                 redisTemplate.delete("auth:refresh-session:" + sessionId);
+                redisTemplate.delete("auth:refresh-grace:" + sessionId);
             }
         }
 
@@ -389,6 +416,8 @@ public class AuthService {
                     .hideActiveStatus(false)
                     .build();
             userProfileRepository.save(profile);
+            newUser.setTrustScore(UserService.computeProfileBaseTrustScore(newUser, profile));
+            userRepository.save(newUser);
 
             UserConsumable consumable = UserConsumable.builder()
                     .userId(newUser.getId())
@@ -472,10 +501,11 @@ public class AuthService {
             if (school.matches("^\\d+$")) {
                 throw new BadRequestException("INVALID_SCHOOL_OR_COMPANY", "Tên trường học hoặc nơi làm việc không thể chỉ toàn chữ số");
             }
-            profile.setSchoolOrCompany(school);
+            profile.setSchoolOrCompany(UserService.validateAndCleanSchoolOrCompany(request.getSchoolOrCompany()));
         }
 
         if (request.getGender() != null) profile.setGender(request.getGender());
+        if (request.getBio() != null) profile.setBio(request.getBio().trim());
         if (request.getInterests() != null) profile.setInterests(request.getInterests());
         if (request.getEarlySleeper() != null) profile.setEarlySleeper(request.getEarlySleeper());
         if (request.getIsNeat() != null) profile.setIsNeat(request.getIsNeat());
@@ -501,6 +531,8 @@ public class AuthService {
             throw new BadRequestException("INVALID_BUDGET_RANGE", "Ngân sách phải không âm và mức tối thiểu không được lớn hơn mức tối đa");
         }
         userProfileRepository.save(profile);
+        user.setTrustScore(UserService.computeProfileBaseTrustScore(user, profile));
+        userRepository.save(user);
     }
 
     @Transactional
@@ -540,11 +572,17 @@ public class AuthService {
         }
         if (request.getAddress() != null && !request.getAddress().isBlank()) {
             profile.setAddress(request.getAddress().trim());
+        }
+        if (request.getBio() != null) {
+            profile.setBio(request.getBio().trim());
+        } else {
             if (profile.getBio() == null || profile.getBio().startsWith("Địa chỉ: ")) {
                 profile.setBio("");
             }
         }
         userProfileRepository.save(profile);
+        user.setTrustScore(UserService.computeProfileBaseTrustScore(user, profile));
+        userRepository.save(user);
 
         if (request.getIdCardNumber() != null && request.getIdCardFrontUrl() != null && request.getIdCardBackUrl() != null) {
             if (Boolean.TRUE.equals(user.getIsVerified()) || userVerificationRepository.existsByUserIdAndStatusIn(
@@ -670,6 +708,7 @@ public class AuthService {
                 .isVerified(user.getIsVerified())
                 .isOnboarded(onboarded)
                 .trustScore(user.getTrustScore())
+                .strikeCount(user.getStrikeCount() != null ? user.getStrikeCount() : 0)
                 .createdAt(user.getCreatedAt())
                 .lastActiveAt(user.getLastActiveAt());
 
@@ -679,7 +718,8 @@ public class AuthService {
         }
 
         if (profile != null) {
-            builder.schoolOrCompany(profile.getSchoolOrCompany())
+            builder.address(profile.getAddress())
+                    .schoolOrCompany(profile.getSchoolOrCompany())
                     .birthDate(profile.getBirthDate())
                     .gender(profile.getGender())
                     .preferredGender(profile.getPreferredGender())
@@ -689,6 +729,7 @@ public class AuthService {
                     .preferredDistricts(profile.getPreferredDistricts())
                     .preferredRoomType(profile.getPreferredRoomType())
                     .interests(profile.getInterests())
+                    .galleryImages(profile.getGalleryImages())
                     .earlySleeper(profile.getEarlySleeper())
                     .isNeat(profile.getIsNeat())
                     .allowGuests(profile.getAllowGuests())

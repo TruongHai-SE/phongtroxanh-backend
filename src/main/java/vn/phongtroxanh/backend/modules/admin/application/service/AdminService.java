@@ -37,6 +37,7 @@ import vn.phongtroxanh.backend.modules.room.infrastructure.repository.RoomReposi
 import vn.phongtroxanh.backend.modules.room.infrastructure.repository.RoomSwipeRepository;
 import vn.phongtroxanh.backend.modules.swap.domain.SwapRequest;
 import vn.phongtroxanh.backend.modules.swap.infrastructure.repository.SwapRequestRepository;
+import vn.phongtroxanh.backend.modules.user.application.service.UserService;
 import vn.phongtroxanh.backend.modules.user.domain.*;
 import vn.phongtroxanh.backend.modules.user.infrastructure.repository.*;
 
@@ -63,6 +64,7 @@ public class AdminService {
 
     private final UserRepository userRepository;
     private final UserProfileRepository userProfileRepository;
+    private final UserConsumableRepository userConsumableRepository;
     private final UserVerificationRepository userVerificationRepository;
     private final TrustScoreLogRepository trustScoreLogRepository;
     private final RoomRepository roomRepository;
@@ -81,6 +83,7 @@ public class AdminService {
     private final PasswordEncoder passwordEncoder;
     private final NotificationService notificationService;
     private final EmailNotificationPort emailNotificationPort;
+    private final UserService userService;
 
     public AdminDashboardResponse getDashboard() {
         List<User> allUsers = userRepository.findAll();
@@ -473,21 +476,19 @@ public class AdminService {
         verification.setReviewedAt(Instant.now());
         userVerificationRepository.save(verification);
 
-        // Update User TrustScore (+30 points) and mark verified
+        // Update User TrustScore (+25 points) and mark verified
         userRepository.findById(verification.getUserId()).ifPresent(user -> {
             entityManager.refresh(user, LockModeType.PESSIMISTIC_WRITE);
             if (Boolean.TRUE.equals(user.getIsVerified())) return;
             user.setIsVerified(true);
-            int oldScore = user.getTrustScore();
-            int newScore = Math.min(100, oldScore + 30);
-            user.setTrustScore(newScore);
             userRepository.save(user);
+            int newScore = userService.recalculateAndSyncTrustScore(user.getId());
 
             trustScoreLogRepository.save(TrustScoreLog.builder()
                     .userId(user.getId())
-                    .delta(30)
+                    .delta(25)
                     .finalScore(newScore)
-                    .reason("Xác thực định danh CCCD thành công (+30 điểm)")
+                    .reason("Xác thực Căn cước công dân thành công (+25 điểm)")
                     .build());
         });
 
@@ -532,6 +533,7 @@ public class AdminService {
                 .role(u.getRole())
                 .status(u.getStatus())
                 .trustScore(u.getTrustScore())
+                .strikeCount(u.getStrikeCount() != null ? u.getStrikeCount() : 0)
                 .isVerified(u.getIsVerified())
                 .createdAt(u.getCreatedAt())
                 .build());
@@ -543,22 +545,68 @@ public class AdminService {
                 .orElseThrow(() -> new ResourceNotFoundException("USER_NOT_FOUND", "Không tìm thấy người dùng"));
 
         UserStatus prevStatus = user.getStatus();
-        user.setStatus(request.getStatus());
-        userRepository.save(user);
+        int prevScore = user.getTrustScore() != null ? user.getTrustScore() : 50;
+        String customReason = (request.getReason() != null && !request.getReason().isBlank())
+                ? request.getReason().trim()
+                : null;
 
-        if (request.getStatus() == UserStatus.LOCKED) {
+        if (request.getStatus() == UserStatus.WARNED) {
+            applyUserStrike(user, customReason != null ? customReason : "Quản trị viên gửi nhắc nhở tuân thủ quy định cộng đồng", false);
+        } else if (request.getStatus() == UserStatus.LOCKED) {
+            applyUserStrike(user, customReason != null ? customReason : "Quản trị viên khóa tài khoản do vi phạm quy định", true);
+        } else if (request.getStatus() == UserStatus.ACTIVE) {
+            user.setStatus(UserStatus.ACTIVE);
+            user.setStrikeCount(0);
+            userRepository.save(user);
+
+            // Khôi phục hiển thị hồ sơ ghép đôi cho Người thuê
+            userProfileRepository.findById(userId).ifPresent(p -> {
+                p.setIsPublic(true);
+                userProfileRepository.save(p);
+            });
+
+            // Khôi phục các phòng còn hạn bị ẩn khi khóa tài khoản Chủ trọ
+            if (prevStatus == UserStatus.LOCKED) {
+                Instant now = Instant.now();
+                List<Room> hiddenRooms = roomRepository.findByLandlordIdOrderByCreatedAtDesc(userId);
+                boolean changed = false;
+                for (Room room : hiddenRooms) {
+                    if (room.getStatus() == RoomStatus.HIDDEN
+                            && (room.getExpiresAt() == null || room.getExpiresAt().isAfter(now))) {
+                        room.setStatus(RoomStatus.AVAILABLE);
+                        changed = true;
+                    }
+                }
+                if (changed) {
+                    roomRepository.saveAll(hiddenRooms);
+                }
+            }
+
+            int restoredScore = userService.recalculateAndSyncTrustScore(userId);
+            int delta = restoredScore - prevScore;
+            String restoreNote = customReason != null
+                    ? "Gỡ cảnh báo vi phạm / Mở khóa tài khoản: " + customReason
+                    : "Quản trị viên gỡ cảnh báo vi phạm và khôi phục trạng thái hoạt động bình thường";
+
             trustScoreLogRepository.save(TrustScoreLog.builder()
                     .userId(userId)
-                    .delta(-user.getTrustScore())
-                    .finalScore(0)
-                    .reason("Tài khoản bị khóa bởi Quản trị viên")
+                    .delta(delta)
+                    .finalScore(restoredScore)
+                    .reason(restoreNote)
                     .build());
-            user.setTrustScore(0);
+
+            notificationService.create(userId,
+                    "Tài khoản đã được gỡ cảnh báo & khôi phục quyền lợi",
+                    restoreNote + ". Mức cảnh báo đã đặt lại về 0/3 và điểm uy tín hiện tại của bạn là " + restoredScore + "/100.",
+                    NotificationType.SYSTEM,
+                    Map.of("strikeCount", 0, "status", "ACTIVE", "trustScore", restoredScore));
+        } else {
+            user.setStatus(request.getStatus());
             userRepository.save(user);
         }
 
-        recordAuditLog("UPDATE_USER_STATUS", "USER", userId, prevStatus.name(), request.getStatus().name());
-        log.info("Updated user {} status to {}", userId, request.getStatus());
+        recordAuditLog("UPDATE_USER_STATUS", "USER", userId, prevStatus.name(), user.getStatus().name());
+        log.info("Updated user {} status to {}", userId, user.getStatus());
     }
 
     @Transactional
@@ -567,17 +615,15 @@ public class AdminService {
                 .orElseThrow(() -> new ResourceNotFoundException("USER_NOT_FOUND", "Không tìm thấy người dùng"));
 
         user.setIsVerified(verified);
-        if (verified) {
-            user.setTrustScore(Math.min(100, user.getTrustScore() + 30));
-        }
         userRepository.save(user);
+        userService.recalculateAndSyncTrustScore(userId);
 
         recordAuditLog(verified ? "GRANT_USER_VERIFIED" : "REVOKE_USER_VERIFIED", "USER", userId, null,
                 verified ? "Cấp tích xanh xác minh thủ công" : "Thu hồi tích xanh xác minh");
 
         notificationService.create(userId,
                 verified ? "Tài khoản của bạn đã được xác minh" : "Trạng thái xác minh đã thay đổi",
-                verified ? "Ban quản trị đã cấp tích xanh xác minh cho hồ sơ của bạn. Điểm uy tín +30." : "Ban quản trị đã thu hồi trạng thái xác minh của hồ sơ.",
+                verified ? "Ban quản trị đã xác minh căn cước cho hồ sơ của bạn (+25 điểm uy tín)." : "Ban quản trị đã thu hồi trạng thái xác minh của hồ sơ.",
                 NotificationType.SYSTEM,
                 Map.of("isVerified", verified));
     }
@@ -835,33 +881,46 @@ public class AdminService {
         report.setHandlerId(currentAdminId);
 
         String action = request.getAction().toLowerCase();
+        String note = (request.getNote() != null && !request.getNote().isBlank())
+                ? request.getNote().trim()
+                : report.getReportType();
         switch (action) {
             case "resolve" -> report.setStatus(ReportStatus.RESOLVED);
             case "dismiss" -> report.setStatus(ReportStatus.DISMISSED);
             case "warn" -> {
                 report.setStatus(ReportStatus.RESOLVED);
-                if ("USER".equalsIgnoreCase(report.getTargetType())) {
-                    userRepository.findById(report.getTargetId()).ifPresent(u -> {
-                        u.setStatus(UserStatus.WARNED);
-                        userRepository.save(u);
-                    });
-                }
+                resolveReportTargetUser(report).ifPresent(u -> applyUserStrike(u, note, false));
             }
             case "ban" -> {
                 report.setStatus(ReportStatus.RESOLVED);
-                if ("USER".equalsIgnoreCase(report.getTargetType())) {
-                    userRepository.findById(report.getTargetId()).ifPresent(u -> {
-                        u.setStatus(UserStatus.LOCKED);
-                        userRepository.save(u);
-                    });
-                }
+                resolveReportTargetUser(report).ifPresent(u -> applyUserStrike(u, note, true));
             }
             case "remove_content" -> {
                 report.setStatus(ReportStatus.RESOLVED);
                 if ("ROOM".equalsIgnoreCase(report.getTargetType())) {
                     roomRepository.findById(report.getTargetId()).ifPresent(r -> {
                         r.setStatus(RoomStatus.HIDDEN);
+                        r.setIsBoosted(false);
+                        r.setBoostExpiresAt(null);
                         roomRepository.save(r);
+                        userRepository.findById(r.getLandlordId()).ifPresent(u -> applyUserStrike(u, note, false));
+                    });
+                } else {
+                    resolveReportTargetUser(report).ifPresent(u -> {
+                        userProfileRepository.findById(u.getId()).ifPresent(p -> {
+                            p.setBio(null);
+                            userProfileRepository.save(p);
+                        });
+                        List<SwapRequest> openSwaps = swapRequestRepository.findByRequesterIdOrderByCreatedAtDesc(u.getId());
+                        for (SwapRequest sr : openSwaps) {
+                            if (sr.getStatus() == vn.phongtroxanh.backend.modules.swap.domain.SwapStatus.OPEN) {
+                                sr.setStatus(vn.phongtroxanh.backend.modules.swap.domain.SwapStatus.CANCELLED);
+                            }
+                        }
+                        if (!openSwaps.isEmpty()) {
+                            swapRequestRepository.saveAll(openSwaps);
+                        }
+                        applyUserStrike(u, note, false);
                     });
                 }
             }
@@ -927,12 +986,121 @@ public class AdminService {
         }
     }
 
+    private java.util.Optional<User> resolveReportTargetUser(Report r) {
+        if ("USER".equalsIgnoreCase(r.getTargetType())) {
+            return userRepository.findById(r.getTargetId());
+        }
+        if ("ROOM".equalsIgnoreCase(r.getTargetType())) {
+            return roomRepository.findById(r.getTargetId())
+                    .flatMap(room -> userRepository.findById(room.getLandlordId()));
+        }
+        return java.util.Optional.empty();
+    }
+
+    private void applyUserStrike(User user, String reason, boolean forceBan) {
+        int currentStrikes = user.getStrikeCount() != null ? user.getStrikeCount() : 0;
+        int newStrikes = forceBan ? Math.max(3, currentStrikes + 1) : currentStrikes + 1;
+        int oldScore = user.getTrustScore() != null ? user.getTrustScore() : 50;
+        String safeReason = (reason != null && !reason.isBlank()) ? reason.trim() : "Vi phạm quy định cộng đồng";
+
+        user.setStrikeCount(newStrikes);
+        if (newStrikes >= 3 || forceBan) {
+            user.setStatus(UserStatus.LOCKED);
+            user.setTrustScore(0);
+            userRepository.save(user);
+
+            List<Room> userRooms = roomRepository.findByLandlordIdOrderByCreatedAtDesc(user.getId());
+            for (Room room : userRooms) {
+                if (room.getStatus() == RoomStatus.AVAILABLE) {
+                    room.setStatus(RoomStatus.HIDDEN);
+                }
+                room.setIsBoosted(false);
+                room.setBoostExpiresAt(null);
+            }
+            if (!userRooms.isEmpty()) {
+                roomRepository.saveAll(userRooms);
+            }
+
+            // Đối với Người thuê (Tenant): ẩn hồ sơ khỏi danh sách ghép đôi, tắt đẩy hồ sơ 24h và đóng các tin sang nhượng đang mở
+            userProfileRepository.findById(user.getId()).ifPresent(p -> {
+                p.setIsPublic(false);
+                userProfileRepository.save(p);
+            });
+            userConsumableRepository.findById(user.getId()).ifPresent(c -> {
+                c.setProfileBoostExpiresAt(null);
+                userConsumableRepository.save(c);
+            });
+            List<SwapRequest> tenantSwaps = swapRequestRepository.findByRequesterIdOrderByCreatedAtDesc(user.getId());
+            for (SwapRequest sr : tenantSwaps) {
+                if (sr.getStatus() == vn.phongtroxanh.backend.modules.swap.domain.SwapStatus.OPEN) {
+                    sr.setStatus(vn.phongtroxanh.backend.modules.swap.domain.SwapStatus.CANCELLED);
+                }
+            }
+            if (!tenantSwaps.isEmpty()) {
+                swapRequestRepository.saveAll(tenantSwaps);
+            }
+
+            trustScoreLogRepository.save(TrustScoreLog.builder()
+                    .userId(user.getId())
+                    .delta(-oldScore)
+                    .finalScore(0)
+                    .reason("Khóa tài khoản do vi phạm quy định cộng đồng (Mức 3/3): " + safeReason)
+                    .build());
+
+            notificationService.create(user.getId(),
+                    "Tài khoản đã bị tạm ngừng hoạt động",
+                    "Tài khoản của bạn đã bị khóa do vi phạm quy định cộng đồng (mức " + Math.min(3, newStrikes) + "/3): " + safeReason + ". Các tin đăng liên quan đã được ẩn theo điều khoản dịch vụ.",
+                    NotificationType.SYSTEM,
+                    Map.of("strikeCount", newStrikes, "status", "LOCKED"));
+        } else {
+            user.setStatus(UserStatus.WARNED);
+            userRepository.save(user);
+
+            if (newStrikes == 2) {
+                List<Room> userRooms = roomRepository.findByLandlordIdOrderByCreatedAtDesc(user.getId());
+                for (Room room : userRooms) {
+                    room.setIsBoosted(false);
+                    room.setBoostExpiresAt(null);
+                }
+                if (!userRooms.isEmpty()) {
+                    roomRepository.saveAll(userRooms);
+                }
+                // Đối với Người thuê (Tenant): tạm dừng hiệu ứng Đẩy hồ sơ tìm bạn ưu tiên (24 giờ)
+                userConsumableRepository.findById(user.getId()).ifPresent(c -> {
+                    c.setProfileBoostExpiresAt(null);
+                    userConsumableRepository.save(c);
+                });
+            }
+
+            int newScore = userService.recalculateAndSyncTrustScore(user.getId());
+            int delta = newScore - oldScore;
+            int logDelta = delta != 0 ? delta : (newStrikes == 1 ? -15 : -25);
+
+            trustScoreLogRepository.save(TrustScoreLog.builder()
+                    .userId(user.getId())
+                    .delta(logDelta)
+                    .finalScore(newScore)
+                    .reason("Nhắc nhở vi phạm quy định lần " + newStrikes + "/3: " + safeReason)
+                    .build());
+
+            notificationService.create(user.getId(),
+                    "Nhắc nhở tuân thủ quy định cộng đồng (Lần " + newStrikes + "/3)",
+                    "Tài khoản của bạn nhận được nhắc nhở lần " + newStrikes + "/3 với lý do: " + safeReason + ". Nếu vi phạm đến lần 3/3, tài khoản sẽ bị khóa và ngừng các gói dịch vụ đang sử dụng.",
+                    NotificationType.SYSTEM,
+                    Map.of("strikeCount", newStrikes, "status", "WARNED"));
+        }
+    }
+
     private AdminReportResponse mapToReportResponse(Report r) {
+        int targetStrikes = resolveReportTargetUser(r)
+                .map(u -> u.getStrikeCount() != null ? u.getStrikeCount() : 0)
+                .orElse(0);
         return AdminReportResponse.builder()
                 .id(r.getId())
                 .reporterId(r.getReporterId())
                 .targetType(r.getTargetType())
                 .targetId(r.getTargetId())
+                .targetStrikeCount(targetStrikes)
                 .reportType(r.getReportType())
                 .detail(r.getDetail())
                 .evidenceImages(r.getEvidenceImages())

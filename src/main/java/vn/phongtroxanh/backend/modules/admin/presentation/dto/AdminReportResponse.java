@@ -17,6 +17,7 @@ public class AdminReportResponse {
     private UUID reporterId;
     private String targetType;
     private UUID targetId;
+    private Integer targetStrikeCount;
     private String reportType;
     private String detail;
     private List<String> evidenceImages;

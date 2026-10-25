@@ -13,25 +13,25 @@ import vn.phongtroxanh.backend.common.exception.BadRequestException;
 import vn.phongtroxanh.backend.common.exception.ForbiddenException;
 import vn.phongtroxanh.backend.common.exception.ResourceNotFoundException;
 import vn.phongtroxanh.backend.common.security.SecurityUtils;
-import vn.phongtroxanh.backend.modules.room.domain.Room;
-import vn.phongtroxanh.backend.modules.room.domain.RoomStatus;
+import vn.phongtroxanh.backend.modules.notification.application.service.NotificationService;
+import vn.phongtroxanh.backend.modules.notification.domain.NotificationType;
 import vn.phongtroxanh.backend.modules.rental.domain.Rental;
 import vn.phongtroxanh.backend.modules.rental.domain.RentalStatus;
 import vn.phongtroxanh.backend.modules.rental.infrastructure.repository.RentalRepository;
+import vn.phongtroxanh.backend.modules.room.domain.Room;
+import vn.phongtroxanh.backend.modules.room.domain.RoomImage;
+import vn.phongtroxanh.backend.modules.room.domain.RoomStatus;
 import vn.phongtroxanh.backend.modules.room.infrastructure.repository.RoomRepository;
 import vn.phongtroxanh.backend.modules.swap.domain.SwapRequest;
 import vn.phongtroxanh.backend.modules.swap.domain.SwapStatus;
 import vn.phongtroxanh.backend.modules.swap.infrastructure.repository.SwapRequestRepository;
 import vn.phongtroxanh.backend.modules.swap.presentation.dto.*;
 import vn.phongtroxanh.backend.modules.user.domain.User;
-import vn.phongtroxanh.backend.modules.user.domain.UserStatus;
-import vn.phongtroxanh.backend.modules.user.domain.UserRole;
-import vn.phongtroxanh.backend.modules.user.infrastructure.repository.UserRepository;
 import vn.phongtroxanh.backend.modules.user.domain.UserProfile;
+import vn.phongtroxanh.backend.modules.user.domain.UserRole;
+import vn.phongtroxanh.backend.modules.user.domain.UserStatus;
 import vn.phongtroxanh.backend.modules.user.infrastructure.repository.UserProfileRepository;
-import vn.phongtroxanh.backend.modules.room.domain.RoomImage;
-import vn.phongtroxanh.backend.modules.notification.application.service.NotificationService;
-import vn.phongtroxanh.backend.modules.notification.domain.NotificationType;
+import vn.phongtroxanh.backend.modules.user.infrastructure.repository.UserRepository;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -156,7 +156,9 @@ public class RoomSwapService {
         post.setProposalCreatedAt(Instant.now());
         post.setStatus(SwapStatus.MATCHING);
         post = swapRequestRepository.save(post);
-        notificationService.create(post.getRequesterId(), "Đề xuất nhận phòng mới", "Có người gửi đề xuất cho bài đăng của bạn",
+        notificationService.create(post.getRequesterId(), "Đề xuất nhận chuyển nhượng mới", "Có người gửi đề xuất cho bài đăng hoán đổi phòng của bạn. Hãy kiểm tra và xác nhận để gửi chủ trọ duyệt.",
+                NotificationType.SYSTEM, Map.of("swapId", post.getId()));
+        notificationService.create(post.getLandlordId(), "Yêu cầu chuyển nhượng phòng mới", "Phòng trọ của bạn có ứng viên nhận chuyển nhượng hợp đồng mới.",
                 NotificationType.SYSTEM, Map.of("swapId", post.getId()));
 
         return mapProposal(post);
@@ -186,7 +188,7 @@ public class RoomSwapService {
         if (target == null) {
             throw new BadRequestException("INVALID_SWAP_STATUS", "Trạng thái không được để trống");
         }
-        if (target == SwapStatus.APPROVED || (target == SwapStatus.DECLINED && swap.getStatus() == SwapStatus.PENDING_LANDLORD)) {
+        if (target == SwapStatus.APPROVED || (target == SwapStatus.DECLINED && (swap.getStatus() == SwapStatus.PENDING_LANDLORD || isLandlord))) {
             if (!isLandlord && !admin) {
                 throw new ForbiddenException("LANDLORD_REQUIRED", "Chỉ chủ trọ mới có quyền quyết định chuyển nhượng");
             }
@@ -196,7 +198,7 @@ public class RoomSwapService {
                 throw new ForbiddenException("OWNER_REQUIRED", "Chỉ chủ bài đăng mới có quyền chấp nhận đề xuất");
             }
             swap.setStatus(SwapStatus.PENDING_LANDLORD);
-            notificationService.create(swap.getLandlordId(), "Yêu cầu chuyển nhượng phòng", "Người thuê đã chấp nhận đề xuất và đang chờ bạn quyết định",
+            notificationService.create(swap.getLandlordId(), "Yêu cầu chuyển nhượng chờ duyệt", "Người thuê đã chấp nhận đề xuất chuyển nhượng và đang chờ bạn phê duyệt",
                     NotificationType.SYSTEM, Map.of("swapId", swap.getId()));
         } else if (target == SwapStatus.DECLINED && swap.getStatus() == SwapStatus.MATCHING) {
             if (!isRequester && !admin) {
@@ -249,27 +251,36 @@ public class RoomSwapService {
     }
 
     private void decide(SwapRequest swap, boolean approve) {
-        if (swap.getStatus() != SwapStatus.PENDING_LANDLORD || swap.getMatchedTenantId() == null
-                || swap.getLandlordDecision() != SwapStatus.PENDING_LANDLORD) {
-            throw new BadRequestException("INVALID_SWAP_TRANSITION", "Chủ bài đăng phải chấp nhận một đề xuất trước khi chủ trọ quyết định");
+        if (!approve) {
+            swap.setLandlordDecision(SwapStatus.DECLINED);
+            swap.setStatus(SwapStatus.DECLINED);
+            notificationService.create(swap.getRequesterId(), "Chuyển nhượng bị từ chối",
+                    "Chủ trọ đã từ chối yêu cầu chuyển nhượng phòng", NotificationType.SYSTEM, Map.of("swapId", swap.getId()));
+            if (swap.getMatchedTenantId() != null) {
+                notificationService.create(swap.getMatchedTenantId(), "Chuyển nhượng bị từ chối",
+                        "Chủ trọ đã từ chối yêu cầu chuyển nhượng phòng", NotificationType.SYSTEM, Map.of("swapId", swap.getId()));
+            }
+            return;
+        }
+
+        if (swap.getMatchedTenantId() == null
+                || (swap.getStatus() != SwapStatus.PENDING_LANDLORD && swap.getStatus() != SwapStatus.MATCHING)) {
+            throw new BadRequestException("INVALID_SWAP_TRANSITION", "Yêu cầu này chưa có ứng viên nhận chuyển nhượng nên chưa thể phê duyệt");
         }
         Rental outgoing = requireLeaseholder(swap.getCurrentRoomId(), swap.getRequesterId());
         if (!swap.getLandlordId().equals(outgoing.getLandlordId())) {
             throw new BadRequestException("INVALID_LANDLORD", "Chủ trọ không khớp hợp đồng hiện tại");
         }
         requireActiveTenant(swap.getMatchedTenantId());
-        swap.setLandlordDecision(approve ? SwapStatus.APPROVED : SwapStatus.DECLINED);
-        swap.setStatus(swap.getLandlordDecision());
-        for (UUID recipient : List.of(swap.getRequesterId(), swap.getMatchedTenantId())) {
-            notificationService.create(recipient, approve ? "Chuyển nhượng được duyệt" : "Chuyển nhượng bị từ chối",
-                    "Chủ trọ đã quyết định yêu cầu chuyển nhượng phòng", NotificationType.SYSTEM, Map.of("swapId", swap.getId()));
-        }
+        swap.setLandlordDecision(SwapStatus.APPROVED);
+        transferLease(swap);
+        swap.setStatus(SwapStatus.COMPLETED);
     }
 
     private Rental requireLeaseholder(UUID roomId, UUID tenantId) {
         return rentalRepository.findByRoomIdAndStatus(roomId, RentalStatus.CHECKED_IN).stream()
                 .filter(r -> tenantId.equals(r.getTenantId()) && Boolean.TRUE.equals(r.getIsLeaseholder()))
-                .findFirst().orElseThrow(() -> new ForbiddenException("LEASEHOLDER_REQUIRED", "Bạn phải là người đứng tên hợp đồng đang thuê phòng này"));
+                .findFirst().orElseThrow(() -> new ForbiddenException("LEASEHOLDER_REQUIRED", "Người đăng phải là người đứng tên hợp đồng đang thuê phòng này"));
     }
 
     private void requireActiveTenant(UUID tenantId) {
@@ -312,17 +323,28 @@ public class RoomSwapService {
             throw new BadRequestException("ROOM_NOT_RENTED", "Phòng không thể chuyển nhượng");
         }
         outgoing.setStatus(RentalStatus.TERMINATED);
+        outgoing.setCheckInCode("TERMINATED");
+        outgoing.setCheckInQrToken("[Đã chuyển nhượng hợp đồng]: Đã sang nhượng với sự phê duyệt của Chủ trọ");
         outgoing.setIsLeaseholder(false);
         rentalRepository.saveAndFlush(outgoing);
-        rentalRepository.save(Rental.builder().roomId(room.getId()).landlordId(room.getLandlordId())
-                .tenantId(swap.getMatchedTenantId()).startDate(start).endDate(outgoing.getEndDate())
+        rentalRepository.save(Rental.builder()
+                .roomId(room.getId())
+                .landlordId(room.getLandlordId())
+                .tenantId(swap.getMatchedTenantId())
+                .startDate(start)
+                .endDate(outgoing.getEndDate())
                 .monthlyRent(outgoing.getMonthlyRent() != null ? outgoing.getMonthlyRent() : room.getPrice())
                 .depositAmount(outgoing.getDepositAmount() != null ? outgoing.getDepositAmount() : room.getDepositAmount())
-                .status(RentalStatus.PENDING_CHECKIN).isLeaseholder(true).build());
+                .status(RentalStatus.PENDING_CHECKIN)
+                .checkInCode("APPROVED")
+                .checkInQrToken("[Nhận chuyển nhượng hợp đồng]: Đã được chủ trọ phê duyệt hoán đổi")
+                .isLeaseholder(true)
+                .build());
         room.setStatus(RoomStatus.AVAILABLE);
         roomRepository.save(room);
         for (UUID recipient : List.of(swap.getRequesterId(), swap.getMatchedTenantId())) {
-            notificationService.create(recipient, "Đã chuyển nhượng hợp đồng", "Hợp đồng mới đang chờ người nhận tạo mã Check-in",
+            notificationService.create(recipient, "Chủ trọ đã phê duyệt chuyển nhượng hợp đồng!",
+                    "Hợp đồng mới đã được khởi tạo trong mục 'Phòng của tôi'. Người nhận có thể xác nhận nhận phòng ngay.",
                     NotificationType.SYSTEM, Map.of("swapId", swap.getId()));
         }
     }
@@ -340,6 +362,13 @@ public class RoomSwapService {
         UserProfile profile = userProfileRepository.findById(post.getRequesterId()).orElse(null);
         Room currentRoom = roomRepository.findById(post.getCurrentRoomId()).orElse(null);
 
+        User matchedUser = post.getMatchedTenantId() != null
+                ? userRepository.findById(post.getMatchedTenantId()).orElse(null)
+                : null;
+        UserProfile matchedProfile = post.getMatchedTenantId() != null
+                ? userProfileRepository.findById(post.getMatchedTenantId()).orElse(null)
+                : null;
+
         List<String> images = (currentRoom != null && currentRoom.getImages() != null)
                 ? currentRoom.getImages().stream().map(RoomImage::getImageUrl).toList()
                 : List.of();
@@ -350,6 +379,7 @@ public class RoomSwapService {
                 .userId(post.getRequesterId())
                 .authorName(requester != null ? requester.getFullName() : "Người dùng")
                 .authorAvatar(requester != null ? requester.getAvatarUrl() : null)
+                .authorTrustScore(requester != null && requester.getTrustScore() != null ? requester.getTrustScore() : 50)
                 .authorSchool(profile != null ? profile.getSchoolOrCompany() : null)
                 .currentRoomId(post.getCurrentRoomId())
                 .currentRoomTitle(currentRoom != null ? currentRoom.getTitle() : "Phòng đang thuê")
@@ -358,7 +388,7 @@ public class RoomSwapService {
                 .currentRoomArea(currentRoom != null ? currentRoom.getAreaSqm() : null)
                 .currentRoomImages(images)
                 .isLeaseholder(post.getIsLeaseholder())
-                .title("Tìm người hoán đổi / pass phòng: " + post.getTargetRoomType())
+                .title(currentRoom != null ? currentRoom.getTitle() : ("Tìm người hoán đổi / pass phòng: " + post.getTargetRoomType()))
                 .description(post.getReason())
                 .reason(post.getReason())
                 .targetDistricts(post.getTargetDistricts())
@@ -370,6 +400,12 @@ public class RoomSwapService {
                 .targetMoveInDate(post.getTargetMoveInDate())
                 .moveInDate(post.getTargetMoveInDate())
                 .matchedTenantId(post.getMatchedTenantId())
+                .matchedTenantName(matchedUser != null ? matchedUser.getFullName() : null)
+                .matchedTenantAvatar(matchedUser != null ? matchedUser.getAvatarUrl() : null)
+                .matchedTenantTrustScore(matchedUser != null && matchedUser.getTrustScore() != null ? matchedUser.getTrustScore() : 50)
+                .matchedTenantSchool(matchedProfile != null ? matchedProfile.getSchoolOrCompany() : null)
+                .matchedTenantVerified(matchedUser != null && Boolean.TRUE.equals(matchedUser.getIsVerified()))
+                .proposalMessage(post.getProposalMessage())
                 .landlordId(post.getLandlordId())
                 .landlordDecision(post.getLandlordDecision())
                 .status(post.getStatus())

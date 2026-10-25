@@ -107,6 +107,11 @@ public class UserProfile implements Serializable {
     @Builder.Default
     private List<String> interests = new ArrayList<>();
 
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "gallery_images", columnDefinition = "varchar(500)[]")
+    @Builder.Default
+    private List<String> galleryImages = new ArrayList<>();
+
     @Column(name = "is_public")
     @Builder.Default
     private Boolean isPublic = true;

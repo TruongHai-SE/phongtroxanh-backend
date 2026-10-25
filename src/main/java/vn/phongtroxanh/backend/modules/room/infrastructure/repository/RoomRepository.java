@@ -35,7 +35,9 @@ public interface RoomRepository extends JpaRepository<Room, UUID>, JpaSpecificat
           AND (CAST(:maxPrice AS NUMERIC) IS NULL OR r.price <= CAST(:maxPrice AS NUMERIC))
           AND (CAST(:keyword AS TEXT) IS NULL OR LOWER(r.title) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%')) OR LOWER(r.address_street) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%')))
         ORDER BY
+          CASE WHEN CAST(:sortBy AS TEXT) = 'boost_first' AND r.is_boosted = TRUE AND r.boost_expires_at > CURRENT_TIMESTAMP THEN 0 ELSE 1 END ASC,
           CASE WHEN CAST(:sortBy AS TEXT) = 'boost_first' AND r.is_boosted = TRUE AND r.boost_expires_at > CURRENT_TIMESTAMP THEN r.boost_expires_at END DESC NULLS LAST,
+          CASE WHEN CAST(:sortBy AS TEXT) = 'boost_first' AND r.is_boosted = TRUE AND r.boost_expires_at > CURRENT_TIMESTAMP THEN r.updated_at END DESC NULLS LAST,
           CASE WHEN CAST(:sortBy AS TEXT) = 'price_asc' THEN r.price END ASC,
           CASE WHEN CAST(:sortBy AS TEXT) = 'price_desc' THEN r.price END DESC,
           r.created_at DESC
@@ -75,6 +77,11 @@ public interface RoomRepository extends JpaRepository<Room, UUID>, JpaSpecificat
           AND (CAST(:maxPrice AS NUMERIC) IS NULL OR r.price <= CAST(:maxPrice AS NUMERIC))
           AND (CAST(:district AS TEXT) IS NULL OR r.district = CAST(:district AS TEXT))
           AND (CAST(:roomType AS TEXT) IS NULL OR r.room_type = CAST(:roomType AS TEXT))
+        ORDER BY
+          CASE WHEN r.is_boosted = TRUE AND r.boost_expires_at > CURRENT_TIMESTAMP THEN 0 ELSE 1 END ASC,
+          r.boost_expires_at DESC NULLS LAST,
+          r.updated_at DESC NULLS LAST,
+          r.created_at DESC
         LIMIT 100
         """, nativeQuery = true)
     List<Room> findRoomsInRadius(
