@@ -101,10 +101,10 @@ public class RentalService {
             throw new ConflictException("ROOM_ALREADY_RESERVED", "Phòng này đang có yêu cầu thuê chờ chủ trọ xử lý. Bạn có thể nhắn tin trực tiếp với chủ trọ.");
         }
 
-        String cleanMessage = request.getMessage() != null && !request.getMessage().trim().isEmpty()
+        String cleanMessage = (request.getMessage() != null && !request.getMessage().trim().isEmpty())
                 ? request.getMessage().trim()
-                : "Em muốn đăng ký thuê phòng này, mong anh/chị xem hồ sơ và duyệt giúp em ạ.";
-        if (cleanMessage.length() > 240) {
+                : null;
+        if (cleanMessage != null && cleanMessage.length() > 240) {
             cleanMessage = cleanMessage.substring(0, 240);
         }
 
@@ -117,7 +117,7 @@ public class RentalService {
                 .monthlyRent(room.getPrice())
                 .depositAmount(room.getDepositAmount())
                 .status(RentalStatus.PENDING_CHECKIN)
-                .checkInCode("REQUESTED")
+                .checkInCode(null)
                 .checkInQrToken(cleanMessage)
                 .isLeaseholder(true)
                 .build();
@@ -311,7 +311,7 @@ public class RentalService {
         }
 
         // Nếu người thuê bấm xác nhận nhận phòng, bắt buộc Chủ trọ phải đã Duyệt yêu cầu ("APPROVED") trước đó
-        if (isTenant && !isLandlord && !isAdmin && "REQUESTED".equalsIgnoreCase(rental.getCheckInCode())) {
+        if (isTenant && !isLandlord && !isAdmin && !"APPROVED".equalsIgnoreCase(rental.getCheckInCode())) {
             throw new BadRequestException("LANDLORD_APPROVAL_REQUIRED", "Chủ trọ chưa duyệt yêu cầu thuê phòng này. Vui lòng chờ chủ trọ duyệt hồ sơ và ngày vào ở trước khi xác nhận nhận phòng.");
         }
 
@@ -515,10 +515,10 @@ public class RentalService {
             approvalStatus = "TERMINATED";
         } else if (rental.getStatus() == RentalStatus.CANCELLED) {
             approvalStatus = "CANCELLED";
-        } else if ("REQUESTED".equalsIgnoreCase(rental.getCheckInCode())) {
-            approvalStatus = "PENDING_APPROVAL";
-        } else {
+        } else if ("APPROVED".equalsIgnoreCase(rental.getCheckInCode())) {
             approvalStatus = "APPROVED";
+        } else {
+            approvalStatus = "PENDING_APPROVAL";
         }
 
         Integer birthYear = (tenantProfile != null && tenantProfile.getBirthDate() != null)
@@ -533,6 +533,10 @@ public class RentalService {
                 && !rental.getEndDate().isAfter(rental.getStartDate()))
                 ? rental.getEndDate()
                 : rental.getStartDate();
+
+        String tenantMessage = (rental.getCheckInQrToken() != null && !rental.getCheckInQrToken().isBlank())
+                ? rental.getCheckInQrToken()
+                : "Em muốn đăng ký thuê phòng này, mong anh/chị xem hồ sơ và duyệt giúp em ạ.";
 
         return RentalResponse.builder()
                 .id(rental.getId())
@@ -551,7 +555,7 @@ public class RentalService {
                 .tenantGender(gender)
                 .tenantBirthYear(birthYear)
                 .tenantBio(tenantProfile != null ? tenantProfile.getBio() : null)
-                .tenantMessage(rental.getCheckInQrToken())
+                .tenantMessage(tenantMessage)
                 .landlordId(rental.getLandlordId())
                 .landlordName(landlord != null ? landlord.getFullName() : "Chủ trọ")
                 .landlordPhone(landlord != null ? landlord.getPhoneNumber() : null)

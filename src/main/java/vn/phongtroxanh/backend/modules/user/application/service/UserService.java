@@ -152,7 +152,7 @@ public class UserService {
         if (request.getPreferredDistricts() != null) profile.setPreferredDistricts(request.getPreferredDistricts());
 
         userProfileRepository.save(profile);
-        recalculateAndSyncTrustScore(user, profile);
+        user.setTrustScore(computeTrustScoreBreakdown(user, profile).getCurrentScore());
         userRepository.save(user);
 
         UserConsumable consumable = userConsumableRepository.findById(currentUserId).orElse(null);
@@ -169,7 +169,7 @@ public class UserService {
         user.setAvatarUrl(avatarUrl);
         user.setUpdatedAt(Instant.now());
         UserProfile profile = userProfileRepository.findById(currentUserId).orElse(null);
-        recalculateAndSyncTrustScore(user, profile);
+        user.setTrustScore(computeTrustScoreBreakdown(user, profile).getCurrentScore());
         userRepository.save(user);
 
         return avatarUrl;
@@ -298,8 +298,10 @@ public class UserService {
     }
 
     private TrustScoreResponse computeTrustScoreBreakdown(User user, UserProfile profile) {
-        UUID userId = user.getId();
-        List<TrustScoreLog> logs = trustScoreLogRepository.findTop20ByUserIdOrderByCreatedAtDesc(userId);
+        UUID userId = user.getId() != null ? user.getId() : SecurityUtils.getCurrentUserId();
+        List<TrustScoreLog> logs = userId != null
+                ? trustScoreLogRepository.findTop20ByUserIdOrderByCreatedAtDesc(userId)
+                : List.of();
         List<TrustScoreResponse.TrustScoreLogItem> history = logs.stream()
                 .map(l -> TrustScoreResponse.TrustScoreLogItem.builder()
                         .id(l.getId())
@@ -354,28 +356,34 @@ public class UserService {
         }
         responseRateScore = Math.min(35, responseRateScore);
 
-        // 3. Nhóm Đánh giá & Tuân thủ (Tối đa 15 điểm): Không vi phạm (+5đ) + Đánh giá sao (+10đ)
+        // 3. Nhóm Đánh giá & Tuân thủ
         int strikes = user.getStrikeCount() != null ? user.getStrikeCount() : 0;
-        int reviewScore = (strikes == 0 && user.getStatus() == UserStatus.ACTIVE) ? 5 : 0;
-        List<Review> reviews = reviewRepository.findByRevieweeIdOrderByCreatedAtDesc(userId).stream()
-                .filter(r -> "ACTIVE".equals(r.getStatus())).toList();
+        List<Review> reviews = userId != null
+                ? reviewRepository.findByRevieweeIdOrderByCreatedAtDesc(userId).stream()
+                        .filter(r -> "ACTIVE".equals(r.getStatus())).toList()
+                : List.of();
+        int reviewScore;
         if (!reviews.isEmpty()) {
             double avgRating = reviews.stream().mapToInt(Review::getRating).average().orElse(0.0);
-            reviewScore += (int) Math.round((avgRating / 5.0) * 10);
+            reviewScore = (int) Math.round((avgRating / 5.0) * 30);
+        } else {
+            reviewScore = (strikes == 0 && hasContact && user.getStatus() == UserStatus.ACTIVE) ? 5 : 0;
         }
-        reviewScore = Math.min(15, reviewScore);
 
-        // 4. Nhóm Hoạt động & Giao dịch phòng (Tối đa 15 điểm): Hoạt động (+5đ) + Hợp đồng thực tế (+10đ)
-        int rentalDurationScore = user.getLastActiveAt() != null ? 5 : 0;
-        List<Rental> tenantRentals = rentalRepository.findByTenantIdOrderByCreatedAtDesc(userId);
-        List<Rental> landlordRentals = rentalRepository.findByLandlordIdOrderByCreatedAtDesc(userId);
+        // 4. Nhóm Hoạt động & Giao dịch phòng (Tối đa 15 điểm)
+        List<Rental> tenantRentals = userId != null
+                ? rentalRepository.findByTenantIdOrderByCreatedAtDesc(userId)
+                : List.of();
+        List<Rental> landlordRentals = userId != null
+                ? rentalRepository.findByLandlordIdOrderByCreatedAtDesc(userId)
+                : List.of();
         long validRentalsCount = Stream.concat(tenantRentals.stream(), landlordRentals.stream())
                 .filter(r -> r.getStatus() == RentalStatus.CHECKED_IN
                         || (r.getStatus() == RentalStatus.TERMINATED && r.getCheckedInAt() != null)).count();
-        if (validRentalsCount > 0) {
-            rentalDurationScore += 10;
-        }
-        rentalDurationScore = Math.min(15, rentalDurationScore);
+        int rentalDurationScore = validRentalsCount > 0
+                ? (int) Math.min(15, validRentalsCount * 10 + (user.getLastActiveAt() != null ? 5 : 0))
+                : 0;
+        int activityBonus = (hasContact && user.getLastActiveAt() != null && validRentalsCount == 0) ? 5 : 0;
 
         // Điểm trừ vi phạm (nếu có)
         int penaltyScore = 0;
@@ -387,9 +395,10 @@ public class UserService {
             penaltyScore = 40;
         }
 
+        int effectiveReviewPoints = Math.min(15, reviewScore);
         int currentScore = (user.getStatus() == UserStatus.LOCKED || strikes >= 3)
                 ? 0
-                : Math.max(0, Math.min(100, kycScore + responseRateScore + reviewScore + rentalDurationScore - penaltyScore));
+                : Math.max(0, Math.min(100, kycScore + responseRateScore + effectiveReviewPoints + rentalDurationScore + activityBonus - penaltyScore));
 
         List<String> badges = new ArrayList<>();
         if (Boolean.TRUE.equals(user.getIsVerified())) {
