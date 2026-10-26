@@ -131,9 +131,41 @@ public class RoomService {
             throw new BadRequestException("INVALID_COMPARE_COUNT", "Chỉ so sánh từ 2 đến 4 phòng cùng lúc");
         }
 
-        List<RoomDetailResponse> details = roomIds.stream()
-                .map(this::getRoomDetail)
-                .toList();
+        List<Room> fetchedRooms = roomRepository.findAllById(roomIds);
+        if (fetchedRooms == null || fetchedRooms.isEmpty()) {
+            List<RoomDetailResponse> fallbackDetails = roomIds.stream()
+                    .map(this::getRoomDetail)
+                    .toList();
+            return new RoomCompareResponse(fallbackDetails);
+        }
+
+        Map<UUID, Room> roomMap = new HashMap<>();
+        Set<UUID> landlordIds = new HashSet<>();
+        for (Room r : fetchedRooms) {
+            roomMap.put(r.getId(), r);
+            if (r.getLandlordId() != null) {
+                landlordIds.add(r.getLandlordId());
+            }
+        }
+
+        Map<UUID, User> landlordMap = new HashMap<>();
+        if (!landlordIds.isEmpty()) {
+            userRepository.findAllById(landlordIds).forEach(u -> landlordMap.put(u.getId(), u));
+        }
+
+        List<RoomDetailResponse> details = new ArrayList<>();
+        for (UUID id : roomIds) {
+            Room room = roomMap.get(id);
+            if (room == null) {
+                throw new ResourceNotFoundException("ROOM_NOT_FOUND", "Không tìm thấy thông tin phòng trọ");
+            }
+            User landlord = landlordMap.getOrDefault(room.getLandlordId(),
+                    landlordMap.isEmpty() ? userRepository.findById(room.getLandlordId()).orElse(null) : null);
+            if (!isPublicRoom(room, landlord) && !canManage(room)) {
+                throw new ResourceNotFoundException("ROOM_NOT_FOUND", "Không tìm thấy thông tin phòng trọ");
+            }
+            details.add(buildRoomDetailResponse(room, landlord));
+        }
 
         return new RoomCompareResponse(details);
     }
@@ -148,18 +180,28 @@ public class RoomService {
             throw new ResourceNotFoundException("ROOM_NOT_FOUND", "Không tìm thấy thông tin phòng trọ");
         }
 
-        // Increment view count in Redis & sync
-        String viewKey = "room:views:" + roomId;
-        String dailyViewKey = "room:views:daily:" + roomId + ":" + LocalDate.now().toString();
-        redisTemplate.opsForValue().increment(dailyViewKey);
-        redisTemplate.expire(dailyViewKey, 30, TimeUnit.DAYS);
+        // Increment view count in Redis & sync (guarded against transient Redis issues)
+        try {
+            if (redisTemplate != null && redisTemplate.opsForValue() != null) {
+                String viewKey = "room:views:" + roomId;
+                String dailyViewKey = "room:views:daily:" + roomId + ":" + LocalDate.now().toString();
+                redisTemplate.opsForValue().increment(dailyViewKey);
+                redisTemplate.expire(dailyViewKey, 30, TimeUnit.DAYS);
 
-        Long currentViews = redisTemplate.opsForValue().increment(viewKey);
-        if (currentViews != null && currentViews % 5 == 0) {
-            room.setViewCount(room.getViewCount() + 5);
-            roomRepository.save(room);
+                Long currentViews = redisTemplate.opsForValue().increment(viewKey);
+                if (currentViews != null && currentViews % 5 == 0) {
+                    room.setViewCount(room.getViewCount() + 5);
+                    roomRepository.save(room);
+                }
+            }
+        } catch (Exception ex) {
+            log.debug("Skipping view counter sync for room {}: {}", roomId, ex.getMessage());
         }
 
+        return buildRoomDetailResponse(room, landlord);
+    }
+
+    private RoomDetailResponse buildRoomDetailResponse(Room room, User landlord) {
         List<RoomImageDTO> images = room.getImages() != null ? room.getImages().stream()
                 .map(img -> RoomImageDTO.builder()
                         .id(img.getId())
@@ -535,12 +577,24 @@ public class RoomService {
 
         List<Room> rooms = roomRepository.findAllById(roomIds);
         Map<UUID, Room> map = new HashMap<>();
-        rooms.forEach(r -> map.put(r.getId(), r));
+        Set<UUID> landlordIds = new HashSet<>();
+        rooms.forEach(r -> {
+            map.put(r.getId(), r);
+            if (r.getLandlordId() != null) {
+                landlordIds.add(r.getLandlordId());
+            }
+        });
+
+        Map<UUID, User> landlordMap = new HashMap<>();
+        if (!landlordIds.isEmpty()) {
+            userRepository.findAllById(landlordIds).forEach(u -> landlordMap.put(u.getId(), u));
+        }
 
         return savedList.stream()
                 .map(sr -> map.get(sr.getRoomId()))
                 .filter(Objects::nonNull)
-                .filter(r -> isPublicRoom(r, userRepository.findById(r.getLandlordId()).orElse(null)))
+                .filter(r -> isPublicRoom(r, landlordMap.getOrDefault(r.getLandlordId(),
+                        landlordMap.isEmpty() ? userRepository.findById(r.getLandlordId()).orElse(null) : null)))
                 .map(this::mapToSummaryResponse)
                 .toList();
     }
@@ -560,12 +614,29 @@ public class RoomService {
         Map<String, Long> viewsChart7Days = new LinkedHashMap<>();
         if (views > 0L && !rooms.isEmpty()) {
             LocalDate today = LocalDate.now();
+            List<String> dateKeys = new ArrayList<>(7);
+            List<String> allRedisKeys = new ArrayList<>(7 * rooms.size());
             for (int i = 6; i >= 0; i--) {
-                LocalDate d = today.minusDays(i);
-                String dateKey = d.toString(); // Standard ISO-8601: "YYYY-MM-DD"
-                long dayViews = 0L;
+                String dateKey = today.minusDays(i).toString();
+                dateKeys.add(dateKey);
                 for (Room r : rooms) {
-                    Object val = redisTemplate.opsForValue().get("room:views:daily:" + r.getId() + ":" + dateKey);
+                    allRedisKeys.add("room:views:daily:" + r.getId() + ":" + dateKey);
+                }
+            }
+
+            List<Object> values = null;
+            try {
+                if (redisTemplate != null && redisTemplate.opsForValue() != null) {
+                    values = redisTemplate.opsForValue().multiGet(allRedisKeys);
+                }
+            } catch (Exception ignored) {}
+
+            int idx = 0;
+            for (String dateKey : dateKeys) {
+                long dayViews = 0L;
+                for (int rIdx = 0; rIdx < rooms.size(); rIdx++) {
+                    Object val = (values != null && idx < values.size()) ? values.get(idx) : null;
+                    idx++;
                     if (val != null) {
                         try {
                             dayViews += Long.parseLong(val.toString());

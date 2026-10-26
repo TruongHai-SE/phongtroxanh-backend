@@ -31,7 +31,11 @@ import vn.phongtroxanh.backend.modules.notification.domain.NotificationType;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
@@ -49,18 +53,58 @@ public class ChatService {
     public List<ConversationResponse> getConversations() {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
         List<Conversation> conversations = conversationRepository.findByUser(currentUserId);
-        List<ConversationResponse> result = new ArrayList<>();
+        if (conversations.isEmpty()) {
+            return List.of();
+        }
+        List<ConversationResponse> result = new ArrayList<>(conversations.size());
+
+        Set<UUID> partnerIds = new HashSet<>();
+        Set<UUID> roomIds = new HashSet<>();
+        for (Conversation c : conversations) {
+            UUID partnerId = c.getParticipantOneId().equals(currentUserId) ? c.getParticipantTwoId() : c.getParticipantOneId();
+            if (partnerId != null) partnerIds.add(partnerId);
+            if (c.getRoomId() != null) roomIds.add(c.getRoomId());
+        }
+
+        Map<UUID, User> partnerMap = new HashMap<>();
+        if (!partnerIds.isEmpty()) {
+            Iterable<User> fetchedPartners = userRepository.findAllById(partnerIds);
+            if (fetchedPartners != null) {
+                fetchedPartners.forEach(u -> {
+                    if (u != null && u.getId() != null) partnerMap.put(u.getId(), u);
+                });
+            }
+        }
+        boolean partnersBatchLoaded = !partnerMap.isEmpty();
+
+        Map<UUID, Room> roomMap = new HashMap<>();
+        if (!roomIds.isEmpty()) {
+            Iterable<Room> fetchedRooms = roomRepository.findAllById(roomIds);
+            if (fetchedRooms != null) {
+                fetchedRooms.forEach(r -> {
+                    if (r != null && r.getId() != null) roomMap.put(r.getId(), r);
+                });
+            }
+        }
+        boolean roomsBatchLoaded = !roomMap.isEmpty();
 
         for (Conversation c : conversations) {
             UUID partnerId = c.getParticipantOneId().equals(currentUserId) ? c.getParticipantTwoId() : c.getParticipantOneId();
-            User partner = userRepository.findById(partnerId).orElse(null);
+            User partner = partnersBatchLoaded
+                    ? partnerMap.get(partnerId)
+                    : userRepository.findById(partnerId).orElse(null);
 
             Message lastMessage = messageRepository.findFirstByConversationIdOrderByCreatedAtDesc(c.getId()).orElse(null);
             long unread = messageRepository.countUnreadMessages(c.getId(), currentUserId);
 
             String roomTitle = null;
             if (c.getRoomId() != null) {
-                roomTitle = roomRepository.findById(c.getRoomId()).map(Room::getTitle).orElse(null);
+                if (roomsBatchLoaded) {
+                    Room room = roomMap.get(c.getRoomId());
+                    roomTitle = room != null ? room.getTitle() : null;
+                } else {
+                    roomTitle = roomRepository.findById(c.getRoomId()).map(Room::getTitle).orElse(null);
+                }
             }
 
             result.add(ConversationResponse.builder()
@@ -94,8 +138,25 @@ public class ChatService {
 
         Page<Message> msgPage = messageRepository.findByConversationIdOrderByCreatedAtDesc(conversationId, pageable);
 
+        Set<UUID> senderIds = new HashSet<>();
+        msgPage.getContent().forEach(m -> {
+            if (m.getSenderId() != null) senderIds.add(m.getSenderId());
+        });
+        Map<UUID, User> senderMap = new HashMap<>();
+        if (!senderIds.isEmpty()) {
+            Iterable<User> fetchedSenders = userRepository.findAllById(senderIds);
+            if (fetchedSenders != null) {
+                fetchedSenders.forEach(u -> {
+                    if (u != null && u.getId() != null) senderMap.put(u.getId(), u);
+                });
+            }
+        }
+        boolean sendersBatchLoaded = !senderMap.isEmpty();
+
         return msgPage.map(m -> {
-            User sender = userRepository.findById(m.getSenderId()).orElse(null);
+            User sender = sendersBatchLoaded
+                    ? senderMap.get(m.getSenderId())
+                    : userRepository.findById(m.getSenderId()).orElse(null);
             return MessageResponse.builder()
                     .id(m.getId())
                     .conversationId(m.getConversationId())

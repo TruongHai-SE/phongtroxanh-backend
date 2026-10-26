@@ -239,6 +239,7 @@ public class AuthService {
             throw new UnauthorizedException("INVALID_TOKEN", "Mã xác thực đã được sử dụng hoặc hết hạn");
         }
         redisTemplate.opsForValue().increment("auth:credential-version:" + user.getId());
+        vn.phongtroxanh.backend.common.security.AccessTokenAuthenticator.evictUser(user.getId());
 
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         user.setUpdatedAt(Instant.now());
@@ -324,6 +325,7 @@ public class AuthService {
                 if ("ACCESS".equals(claims.get("type", String.class))) {
                     long remainingMs = claims.getExpiration().getTime() - System.currentTimeMillis();
                     if (remainingMs > 0) redisTemplate.opsForValue().set("auth:blacklist:" + token, "revoked", remainingMs, TimeUnit.MILLISECONDS);
+                    vn.phongtroxanh.backend.common.security.AccessTokenAuthenticator.evictToken(token);
                 }
             }
         }

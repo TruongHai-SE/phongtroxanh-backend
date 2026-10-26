@@ -33,8 +33,11 @@ import vn.phongtroxanh.backend.modules.user.infrastructure.repository.UserReposi
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -238,20 +241,78 @@ public class RentalService {
 
     public List<RentalResponse> getMyTenantRentals() {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
-        return rentalRepository.findByTenantIdOrderByCreatedAtDesc(currentUserId).stream()
-                .map(r -> {
-                    Room room = roomRepository.findById(r.getRoomId()).orElse(null);
-                    return mapToResponse(r, room);
-                })
-                .toList();
+        return mapRentalsBatch(rentalRepository.findByTenantIdOrderByCreatedAtDesc(currentUserId));
     }
 
     public List<RentalResponse> getMyLandlordRentals() {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
-        return rentalRepository.findByLandlordIdOrderByCreatedAtDesc(currentUserId).stream()
+        return mapRentalsBatch(rentalRepository.findByLandlordIdOrderByCreatedAtDesc(currentUserId));
+    }
+
+    private List<RentalResponse> mapRentalsBatch(List<Rental> rentals) {
+        if (rentals == null || rentals.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> roomIds = new HashSet<>();
+        Set<UUID> userIds = new HashSet<>();
+        Set<UUID> tenantIds = new HashSet<>();
+        for (Rental r : rentals) {
+            if (r.getRoomId() != null) roomIds.add(r.getRoomId());
+            if (r.getTenantId() != null) {
+                userIds.add(r.getTenantId());
+                tenantIds.add(r.getTenantId());
+            }
+            if (r.getLandlordId() != null) userIds.add(r.getLandlordId());
+        }
+
+        Map<UUID, Room> roomMap = new HashMap<>();
+        if (!roomIds.isEmpty()) {
+            Iterable<Room> fetchedRooms = roomRepository.findAllById(roomIds);
+            if (fetchedRooms != null) {
+                fetchedRooms.forEach(rm -> {
+                    if (rm != null && rm.getId() != null) roomMap.put(rm.getId(), rm);
+                });
+            }
+        }
+        boolean roomsBatchLoaded = !roomMap.isEmpty();
+
+        Map<UUID, User> userMap = new HashMap<>();
+        if (!userIds.isEmpty()) {
+            Iterable<User> fetchedUsers = userRepository.findAllById(userIds);
+            if (fetchedUsers != null) {
+                fetchedUsers.forEach(u -> {
+                    if (u != null && u.getId() != null) userMap.put(u.getId(), u);
+                });
+            }
+        }
+        boolean usersBatchLoaded = !userMap.isEmpty();
+
+        Map<UUID, UserProfile> profileMap = new HashMap<>();
+        if (userProfileRepository != null && !tenantIds.isEmpty()) {
+            Iterable<UserProfile> fetchedProfiles = userProfileRepository.findAllById(tenantIds);
+            if (fetchedProfiles != null) {
+                fetchedProfiles.forEach(p -> {
+                    if (p != null && p.getUserId() != null) profileMap.put(p.getUserId(), p);
+                });
+            }
+        }
+        boolean profilesBatchLoaded = !profileMap.isEmpty();
+
+        return rentals.stream()
                 .map(r -> {
-                    Room room = roomRepository.findById(r.getRoomId()).orElse(null);
-                    return mapToResponse(r, room);
+                    Room room = roomsBatchLoaded
+                            ? roomMap.get(r.getRoomId())
+                            : roomRepository.findById(r.getRoomId()).orElse(null);
+                    User tenant = usersBatchLoaded
+                            ? userMap.get(r.getTenantId())
+                            : userRepository.findById(r.getTenantId()).orElse(null);
+                    UserProfile tenantProfile = profilesBatchLoaded
+                            ? profileMap.get(r.getTenantId())
+                            : (userProfileRepository != null ? userProfileRepository.findById(r.getTenantId()).orElse(null) : null);
+                    User landlord = usersBatchLoaded
+                            ? userMap.get(r.getLandlordId())
+                            : userRepository.findById(r.getLandlordId()).orElse(null);
+                    return buildRentalResponse(r, room, tenant, tenantProfile, landlord);
                 })
                 .toList();
     }
@@ -502,6 +563,10 @@ public class RentalService {
                 ? userProfileRepository.findById(rental.getTenantId()).orElse(null)
                 : null;
         User landlord = userRepository.findById(rental.getLandlordId()).orElse(null);
+        return buildRentalResponse(rental, room, tenant, tenantProfile, landlord);
+    }
+
+    private RentalResponse buildRentalResponse(Rental rental, Room room, User tenant, UserProfile tenantProfile, User landlord) {
 
         BigDecimal price = rental.getMonthlyRent() != null ? rental.getMonthlyRent()
                 : (room != null ? room.getPrice() : BigDecimal.ZERO);
