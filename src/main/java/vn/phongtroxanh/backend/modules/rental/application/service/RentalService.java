@@ -76,8 +76,8 @@ public class RentalService {
                 .orElseThrow(() -> new ResourceNotFoundException("ROOM_NOT_FOUND", "Không tìm thấy phòng trọ"));
         entityManager.refresh(room, LockModeType.PESSIMISTIC_WRITE);
 
-        if (room.getStatus() != RoomStatus.AVAILABLE || (room.getExpiresAt() != null && !room.getExpiresAt().isAfter(Instant.now()))) {
-            throw new BadRequestException("ROOM_NOT_AVAILABLE", "Phòng này hiện không còn trống hoặc đã hết hạn đăng tin");
+        if (room.getStatus() != RoomStatus.AVAILABLE) {
+            throw new BadRequestException("ROOM_NOT_AVAILABLE", "Phòng này hiện không còn trống");
         }
 
         if (room.getLandlordId().equals(currentUserId)) {
