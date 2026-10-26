@@ -234,6 +234,11 @@ public class RoomService {
             lng = coordinates.longitude();
         }
 
+        int maxOccupants = request.getMaxOccupants() != null ? request.getMaxOccupants() : 2;
+        if (maxOccupants < 1 || maxOccupants > 20) {
+            throw new BadRequestException("INVALID_MAX_OCCUPANTS", "Số người ở tối đa phải từ 1 đến 20 người");
+        }
+
         Room room = Room.builder()
                 .landlordId(landlordId)
                 .title(request.getTitle())
@@ -243,14 +248,14 @@ public class RoomService {
                 .depositAmount(request.getDepositAmount())
                 .areaSqm(request.getAreaSqm())
                 .floorNumber(request.getFloorNumber() != null ? request.getFloorNumber() : 1)
-                .maxOccupants(request.getMaxOccupants() != null ? request.getMaxOccupants() : 2)
+                .maxOccupants(maxOccupants)
                 .addressStreet(request.getAddressStreet())
                 .district(request.getDistrict())
                 .city(request.getCity() != null ? request.getCity() : "TP.HCM")
                 .latitude(lat)
                 .longitude(lng)
                 .status(RoomStatus.AVAILABLE)
-                .isVerified(false)
+                .isVerified(userRepository.findById(landlordId).map(u -> Boolean.TRUE.equals(u.getIsVerified())).orElse(false))
                 .isBoosted(false)
                 .viewCount(0L)
                 .amenities(request.getAmenities() != null ? new ArrayList<>(request.getAmenities()) : new ArrayList<>())
@@ -299,7 +304,12 @@ public class RoomService {
         if (request.getDepositAmount() != null) room.setDepositAmount(request.getDepositAmount());
         if (request.getAreaSqm() != null) room.setAreaSqm(request.getAreaSqm());
         if (request.getFloorNumber() != null) room.setFloorNumber(request.getFloorNumber());
-        if (request.getMaxOccupants() != null) room.setMaxOccupants(request.getMaxOccupants());
+        if (request.getMaxOccupants() != null) {
+            if (request.getMaxOccupants() < 1 || request.getMaxOccupants() > 20) {
+                throw new BadRequestException("INVALID_MAX_OCCUPANTS", "Số người ở tối đa phải từ 1 đến 20 người");
+            }
+            room.setMaxOccupants(request.getMaxOccupants());
+        }
         if (request.getAddressStreet() != null) room.setAddressStreet(request.getAddressStreet());
         if (request.getDistrict() != null) room.setDistrict(request.getDistrict());
         if (request.getCity() != null) room.setCity(request.getCity());
@@ -412,8 +422,8 @@ public class RoomService {
 
         assertOwnership(room.getLandlordId());
 
-        if (room.getStatus() != RoomStatus.AVAILABLE || room.getExpiresAt() == null || !room.getExpiresAt().isAfter(Instant.now())) {
-            throw new BadRequestException("ROOM_NOT_AVAILABLE", "Chỉ có thể đẩy tin phòng đang còn hiệu lực và có sẵn");
+        if (room.getStatus() != RoomStatus.AVAILABLE) {
+            throw new BadRequestException("ROOM_NOT_AVAILABLE", "Chỉ có thể đẩy tin phòng đang ở trạng thái Còn trống");
         }
         User landlord = userRepository.findById(landlordId).orElse(null);
         if (landlord != null && landlord.getStrikeCount() != null && landlord.getStrikeCount() >= 2) {
@@ -539,8 +549,7 @@ public class RoomService {
         UUID landlordId = SecurityUtils.getCurrentUserId();
         List<Room> rooms = roomRepository.findByLandlordIdOrderByCreatedAtDesc(landlordId);
         long total = rooms.size();
-        long active = rooms.stream().filter(r -> r.getStatus() == RoomStatus.AVAILABLE
-                && r.getExpiresAt() != null && r.getExpiresAt().isAfter(Instant.now())).count();
+        long active = rooms.stream().filter(r -> r.getStatus() == RoomStatus.AVAILABLE).count();
         long rented = rooms.stream().filter(r -> r.getStatus() == RoomStatus.RENTED).count();
         long views = rooms.stream().mapToLong(Room::getViewCount).sum();
         double occupancy = total > 0 ? (double) rented / total * 100 : 0.0;
@@ -595,8 +604,7 @@ public class RoomService {
     }
 
     private boolean isPublicRoom(Room room, User landlord) {
-        return room.getStatus() == RoomStatus.AVAILABLE && room.getExpiresAt() != null
-                && room.getExpiresAt().isAfter(Instant.now()) && landlord != null
+        return room.getStatus() == RoomStatus.AVAILABLE && landlord != null
                 && landlord.getStatus() != UserStatus.LOCKED && landlord.getStatus() != UserStatus.DELETED;
     }
 
@@ -638,11 +646,16 @@ public class RoomService {
     }
 
     private RoomSummaryResponse mapToSummaryResponse(Room r) {
+        List<String> imageUrls = r.getImages() != null ? r.getImages().stream()
+                .map(RoomImage::getImageUrl)
+                .filter(Objects::nonNull)
+                .toList() : List.of();
+
         String primaryImage = r.getImages() != null ? r.getImages().stream()
                 .filter(img -> Boolean.TRUE.equals(img.getIsPrimary()))
                 .findFirst()
                 .map(RoomImage::getImageUrl)
-                .orElse(null) : null;
+                .orElse(imageUrls.isEmpty() ? null : imageUrls.getFirst()) : null;
 
         return RoomSummaryResponse.builder()
                 .id(r.getId())
@@ -664,6 +677,7 @@ public class RoomService {
                 .isBoosted(hasActiveBoost(r))
                 .viewCount(r.getViewCount())
                 .primaryImageUrl(primaryImage)
+                .images(imageUrls)
                 .amenities(r.getAmenities() != null ? r.getAmenities() : new ArrayList<>())
                 .createdAt(r.getCreatedAt())
                 .expiresAt(r.getExpiresAt())
@@ -688,7 +702,7 @@ public class RoomService {
 
         for (Room r : existingRooms) {
             // Only compare with rooms currently active/available
-            if (r.getStatus() != RoomStatus.AVAILABLE || r.getExpiresAt() == null || !r.getExpiresAt().isAfter(now)) {
+            if (r.getStatus() != RoomStatus.AVAILABLE) {
                 continue;
             }
 

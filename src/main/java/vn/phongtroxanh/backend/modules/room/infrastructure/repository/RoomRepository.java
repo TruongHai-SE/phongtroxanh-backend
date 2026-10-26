@@ -24,16 +24,26 @@ public interface RoomRepository extends JpaRepository<Room, UUID>, JpaSpecificat
     @Query(value = """
         SELECT r.* FROM rooms r
         WHERE r.status = 'AVAILABLE'
-          AND r.expires_at > CURRENT_TIMESTAMP
           AND EXISTS (SELECT 1 FROM users u WHERE u.id = r.landlord_id AND u.status NOT IN ('LOCKED', 'DELETED'))
           AND (CAST(:excludeUserId AS UUID) IS NULL OR NOT EXISTS (
               SELECT 1 FROM room_swipes rs WHERE rs.room_id = r.id AND rs.user_id = CAST(:excludeUserId AS UUID)
           ))
-          AND (CAST(:district AS TEXT) IS NULL OR r.district = CAST(:district AS TEXT))
-          AND (CAST(:roomType AS TEXT) IS NULL OR r.room_type = CAST(:roomType AS TEXT))
+          AND (CAST(:district AS TEXT) IS NULL
+              OR LOWER(r.district) = LOWER(CAST(:district AS TEXT))
+              OR (LOWER(CAST(:district AS TEXT)) IN ('thủ đức', 'tp. thủ đức', 'thu duc') AND LOWER(r.district) IN ('thủ đức', 'tp. thủ đức', 'thu duc')))
+          AND (CAST(:roomType AS TEXT) IS NULL
+              OR LOWER(r.room_type) = LOWER(CAST(:roomType AS TEXT))
+              OR (LOWER(CAST(:roomType AS TEXT)) IN ('phòng khép kín', 'phong_khep_kin') AND r.room_type IN ('Phòng khép kín', 'PHONG_KHEP_KIN'))
+              OR (LOWER(CAST(:roomType AS TEXT)) IN ('studio') AND r.room_type IN ('Studio', 'STUDIO', 'PHONG_KHEP_KIN'))
+              OR (LOWER(CAST(:roomType AS TEXT)) IN ('phòng trọ', 'phong_tro') AND r.room_type IN ('Phòng trọ', 'PHONG_TRO'))
+              OR (LOWER(CAST(:roomType AS TEXT)) IN ('căn hộ mini', 'can_ho_mini', 'chung_cu_mini') AND r.room_type IN ('Căn hộ mini', 'CAN_HO_MINI', 'CHUNG_CU_MINI'))
+              OR (LOWER(CAST(:roomType AS TEXT)) IN ('ở ghép', 'o_ghep', 'ktx_sleepbox') AND r.room_type IN ('Ở ghép', 'O_GHEP', 'KTX_SLEEPBOX', 'SLEEPBOX', 'KY_TUC_XA')))
           AND (CAST(:minPrice AS NUMERIC) IS NULL OR r.price >= CAST(:minPrice AS NUMERIC))
           AND (CAST(:maxPrice AS NUMERIC) IS NULL OR r.price <= CAST(:maxPrice AS NUMERIC))
-          AND (CAST(:keyword AS TEXT) IS NULL OR LOWER(r.title) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%')) OR LOWER(r.address_street) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%')))
+          AND (CAST(:keyword AS TEXT) IS NULL
+              OR LOWER(r.title) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%'))
+              OR LOWER(r.address_street) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%'))
+              OR LOWER(r.district) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%')))
         ORDER BY
           CASE WHEN CAST(:sortBy AS TEXT) = 'boost_first' AND r.is_boosted = TRUE AND r.boost_expires_at > CURRENT_TIMESTAMP THEN 0 ELSE 1 END ASC,
           CASE WHEN CAST(:sortBy AS TEXT) = 'boost_first' AND r.is_boosted = TRUE AND r.boost_expires_at > CURRENT_TIMESTAMP THEN r.boost_expires_at END DESC NULLS LAST,
@@ -45,16 +55,26 @@ public interface RoomRepository extends JpaRepository<Room, UUID>, JpaSpecificat
         countQuery = """
         SELECT count(*) FROM rooms r
         WHERE r.status = 'AVAILABLE'
-          AND r.expires_at > CURRENT_TIMESTAMP
           AND EXISTS (SELECT 1 FROM users u WHERE u.id = r.landlord_id AND u.status NOT IN ('LOCKED', 'DELETED'))
           AND (CAST(:excludeUserId AS UUID) IS NULL OR NOT EXISTS (
               SELECT 1 FROM room_swipes rs WHERE rs.room_id = r.id AND rs.user_id = CAST(:excludeUserId AS UUID)
           ))
-          AND (CAST(:district AS TEXT) IS NULL OR r.district = CAST(:district AS TEXT))
-          AND (CAST(:roomType AS TEXT) IS NULL OR r.room_type = CAST(:roomType AS TEXT))
+          AND (CAST(:district AS TEXT) IS NULL
+              OR LOWER(r.district) = LOWER(CAST(:district AS TEXT))
+              OR (LOWER(CAST(:district AS TEXT)) IN ('thủ đức', 'tp. thủ đức', 'thu duc') AND LOWER(r.district) IN ('thủ đức', 'tp. thủ đức', 'thu duc')))
+          AND (CAST(:roomType AS TEXT) IS NULL
+              OR LOWER(r.room_type) = LOWER(CAST(:roomType AS TEXT))
+              OR (LOWER(CAST(:roomType AS TEXT)) IN ('phòng khép kín', 'phong_khep_kin') AND r.room_type IN ('Phòng khép kín', 'PHONG_KHEP_KIN'))
+              OR (LOWER(CAST(:roomType AS TEXT)) IN ('studio') AND r.room_type IN ('Studio', 'STUDIO', 'PHONG_KHEP_KIN'))
+              OR (LOWER(CAST(:roomType AS TEXT)) IN ('phòng trọ', 'phong_tro') AND r.room_type IN ('Phòng trọ', 'PHONG_TRO'))
+              OR (LOWER(CAST(:roomType AS TEXT)) IN ('căn hộ mini', 'can_ho_mini', 'chung_cu_mini') AND r.room_type IN ('Căn hộ mini', 'CAN_HO_MINI', 'CHUNG_CU_MINI'))
+              OR (LOWER(CAST(:roomType AS TEXT)) IN ('ở ghép', 'o_ghep', 'ktx_sleepbox') AND r.room_type IN ('Ở ghép', 'O_GHEP', 'KTX_SLEEPBOX', 'SLEEPBOX', 'KY_TUC_XA')))
           AND (CAST(:minPrice AS NUMERIC) IS NULL OR r.price >= CAST(:minPrice AS NUMERIC))
           AND (CAST(:maxPrice AS NUMERIC) IS NULL OR r.price <= CAST(:maxPrice AS NUMERIC))
-          AND (CAST(:keyword AS TEXT) IS NULL OR LOWER(r.title) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%')) OR LOWER(r.address_street) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%')))
+          AND (CAST(:keyword AS TEXT) IS NULL
+              OR LOWER(r.title) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%'))
+              OR LOWER(r.address_street) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%'))
+              OR LOWER(r.district) LIKE LOWER(CONCAT('%', CAST(:keyword AS TEXT), '%')))
         """,
         nativeQuery = true)
     Page<Room> searchRooms(
@@ -70,7 +90,6 @@ public interface RoomRepository extends JpaRepository<Room, UUID>, JpaSpecificat
     @Query(value = """
         SELECT r.* FROM rooms r
         WHERE r.status = 'AVAILABLE'
-          AND r.expires_at > CURRENT_TIMESTAMP
           AND EXISTS (SELECT 1 FROM users u WHERE u.id = r.landlord_id AND u.status NOT IN ('LOCKED', 'DELETED'))
           AND ST_DWithin(r.location::geography, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography, :radiusMeters)
           AND (CAST(:minPrice AS NUMERIC) IS NULL OR r.price >= CAST(:minPrice AS NUMERIC))

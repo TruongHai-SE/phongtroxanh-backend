@@ -34,6 +34,7 @@ public class RoomSummaryResponse {
     private Boolean isBoosted;
     private Long viewCount;
     private String primaryImageUrl;
+    private List<String> images;
     private List<String> amenities;
     private Instant createdAt;
     private Instant expiresAt;
