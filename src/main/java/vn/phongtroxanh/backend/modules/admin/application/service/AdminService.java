@@ -87,14 +87,29 @@ public class AdminService {
 
     public AdminDashboardResponse getDashboard() {
         List<User> allUsers = userRepository.findAll();
+        Map<UUID, User> userMap = new HashMap<>();
+        allUsers.forEach(u -> {
+            if (u != null && u.getId() != null) userMap.put(u.getId(), u);
+        });
+        boolean usersLoaded = !userMap.isEmpty();
+
+        List<Room> allRoomsList = roomRepository.findAll();
+        Map<UUID, Room> roomMap = new HashMap<>();
+        allRoomsList.forEach(rm -> {
+            if (rm != null && rm.getId() != null) roomMap.put(rm.getId(), rm);
+        });
+        boolean roomsLoaded = !roomMap.isEmpty();
+
+        List<Rental> allRentals = rentalRepository.findAll();
+
         long totalUsers = allUsers.size();
         long totalLandlords = allUsers.stream().filter(u -> u.getRole() == UserRole.LANDLORD).count();
         long totalTenants = allUsers.stream().filter(u -> u.getRole() == UserRole.TENANT).count();
-        long totalRooms = roomRepository.count();
-        long activeRooms = roomRepository.findAll().stream().filter(r -> r.getStatus() == RoomStatus.AVAILABLE).count();
+        long totalRooms = !allRoomsList.isEmpty() ? allRoomsList.size() : roomRepository.count();
+        long activeRooms = allRoomsList.stream().filter(r -> r.getStatus() == RoomStatus.AVAILABLE).count();
         long totalMatches = matchRepository.count();
-        long totalRentals = rentalRepository.count();
-        long activeRentals = rentalRepository.findAll().stream().filter(r -> r.getStatus() == RentalStatus.CHECKED_IN).count();
+        long totalRentals = !allRentals.isEmpty() ? allRentals.size() : rentalRepository.count();
+        long activeRentals = allRentals.stream().filter(r -> r.getStatus() == RentalStatus.CHECKED_IN).count();
         long pendingKyc = userVerificationRepository.findByStatus(VerificationStatus.PENDING, Pageable.unpaged()).getTotalElements();
         long pendingDisputes = reviewDisputeRepository.findByStatus("PENDING_REVIEW", Pageable.unpaged()).getTotalElements();
         long pendingReports = reportRepository.findByStatusOrderByCreatedAtDesc(ReportStatus.NEW, Pageable.unpaged()).getTotalElements()
@@ -124,7 +139,9 @@ public class AdminService {
         double landlordAverageRating = allReviews.stream()
                 .filter(r -> {
                     if (r.getRoomId() != null) return true;
-                    User reviewee = userRepository.findById(r.getRevieweeId()).orElse(null);
+                    User reviewee = usersLoaded
+                            ? userMap.get(r.getRevieweeId())
+                            : userRepository.findById(r.getRevieweeId()).orElse(null);
                     return reviewee != null && reviewee.getRole() == UserRole.LANDLORD;
                 })
                 .mapToInt(Review::getRating)
@@ -151,7 +168,6 @@ public class AdminService {
         // 2. Thống kê tăng trưởng 6 tháng gần nhất từ DB
         List<AdminDashboardResponse.MonthlyStatDTO> monthlyStats = new ArrayList<>();
         java.time.YearMonth currentYm = java.time.YearMonth.now();
-        List<Rental> allRentals = rentalRepository.findAll();
         for (int i = 5; i >= 0; i--) {
             java.time.YearMonth ym = currentYm.minusMonths(i);
             Instant start = ym.atDay(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
@@ -182,16 +198,22 @@ public class AdminService {
                         .compareTo(a.getCreatedAt() != null ? a.getCreatedAt() : Instant.MIN))
                 .limit(100)
                 .map(r -> {
-                    User reviewer = userRepository.findById(r.getReviewerId()).orElse(null);
+                    User reviewer = usersLoaded
+                            ? userMap.get(r.getReviewerId())
+                            : userRepository.findById(r.getReviewerId()).orElse(null);
                     String name = reviewer != null ? reviewer.getFullName() : "Người dùng Phòng Trọ Xanh";
                     String roleStr = (reviewer != null && reviewer.getRole() == UserRole.LANDLORD) ? "Chủ trọ" : "Người thuê";
 
-                    User landlord = r.getRevieweeId() != null ? userRepository.findById(r.getRevieweeId()).orElse(null) : null;
+                    User landlord = r.getRevieweeId() != null
+                            ? (usersLoaded ? userMap.get(r.getRevieweeId()) : userRepository.findById(r.getRevieweeId()).orElse(null))
+                            : null;
                     String lName = landlord != null ? landlord.getFullName() : "Chủ trọ hệ thống";
 
                     String rTitle = "Phòng trọ cao cấp";
                     if (r.getRoomId() != null) {
-                        Room room = roomRepository.findById(r.getRoomId()).orElse(null);
+                        Room room = roomsLoaded
+                                ? roomMap.get(r.getRoomId())
+                                : roomRepository.findById(r.getRoomId()).orElse(null);
                         if (room != null && room.getTitle() != null) {
                             rTitle = room.getTitle();
                         }
@@ -221,7 +243,6 @@ public class AdminService {
             packageStats.add(new AdminDashboardResponse.PackageRevenueDTO(planName, planName, sum, (long) txList.size()));
         });
 
-        List<Room> allRoomsList = roomRepository.findAll();
         long activeBoostedRooms = allRoomsList.stream().filter(r -> Boolean.TRUE.equals(r.getIsBoosted())).count();
 
         // 6. Phân bố loại phòng thực tế từ DB
@@ -354,7 +375,9 @@ public class AdminService {
                     String userName = "Người dùng ẩn danh";
                     String userRole = "TENANT";
                     if (fb.getUserId() != null) {
-                        User u = userRepository.findById(fb.getUserId()).orElse(null);
+                        User u = usersLoaded
+                                ? userMap.get(fb.getUserId())
+                                : userRepository.findById(fb.getUserId()).orElse(null);
                         if (u != null) {
                             userName = u.getFullName() != null ? u.getFullName() : u.getEmail();
                             userRole = u.getRole() != null ? u.getRole().name() : "TENANT";
@@ -415,8 +438,25 @@ public class AdminService {
         List<KycAuditItemDTO> filtered = new ArrayList<>();
         String searchLower = (search != null && !search.isBlank()) ? search.trim().toLowerCase() : null;
 
+        Set<UUID> kycUserIds = new HashSet<>();
         for (UserVerification v : list) {
-            User user = userRepository.findById(v.getUserId()).orElse(null);
+            if (v.getUserId() != null) kycUserIds.add(v.getUserId());
+        }
+        Map<UUID, User> kycUserMap = new HashMap<>();
+        if (!kycUserIds.isEmpty()) {
+            Iterable<User> fetched = userRepository.findAllById(kycUserIds);
+            if (fetched != null) {
+                fetched.forEach(u -> {
+                    if (u != null && u.getId() != null) kycUserMap.put(u.getId(), u);
+                });
+            }
+        }
+        boolean kycUsersBatchLoaded = !kycUserMap.isEmpty();
+
+        for (UserVerification v : list) {
+            User user = kycUsersBatchLoaded
+                    ? kycUserMap.get(v.getUserId())
+                    : userRepository.findById(v.getUserId()).orElse(null);
             if (role != null && (user == null || user.getRole() != role)) {
                 continue;
             }
@@ -613,6 +653,7 @@ public class AdminService {
         }
 
         recordAuditLog("UPDATE_USER_STATUS", "USER", userId, prevStatus.name(), user.getStatus().name());
+        vn.phongtroxanh.backend.common.security.AccessTokenAuthenticator.evictUser(userId);
         log.info("Updated user {} status to {}", userId, user.getStatus());
     }
 

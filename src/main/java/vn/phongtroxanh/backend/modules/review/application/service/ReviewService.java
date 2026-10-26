@@ -34,7 +34,11 @@ import vn.phongtroxanh.backend.modules.review.presentation.dto.SystemFeedbackRes
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -135,16 +139,41 @@ public class ReviewService {
     }
 
     public List<ReviewResponse> getReviewsForRoom(UUID roomId) {
-        return reviewRepository.findByRoomIdOrderByCreatedAtDesc(roomId).stream()
+        List<Review> list = reviewRepository.findByRoomIdOrderByCreatedAtDesc(roomId).stream()
                 .filter(r -> !"REMOVED".equals(r.getStatus()))
-                .map(this::mapToResponse)
                 .toList();
+        return mapReviewsBatch(list);
     }
 
     public List<ReviewResponse> getReviewsForUser(UUID userId) {
-        return reviewRepository.findByRevieweeIdOrderByCreatedAtDesc(userId).stream()
+        List<Review> list = reviewRepository.findByRevieweeIdOrderByCreatedAtDesc(userId).stream()
                 .filter(r -> !"REMOVED".equals(r.getStatus()))
-                .map(this::mapToResponse)
+                .toList();
+        return mapReviewsBatch(list);
+    }
+
+    private List<ReviewResponse> mapReviewsBatch(List<Review> reviews) {
+        if (reviews == null || reviews.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> reviewerIds = new HashSet<>();
+        for (Review r : reviews) {
+            if (r.getReviewerId() != null) reviewerIds.add(r.getReviewerId());
+        }
+        Map<UUID, User> reviewerMap = new HashMap<>();
+        if (!reviewerIds.isEmpty() && userRepository != null) {
+            Iterable<User> fetched = userRepository.findAllById(reviewerIds);
+            if (fetched != null) {
+                fetched.forEach(u -> {
+                    if (u != null && u.getId() != null) reviewerMap.put(u.getId(), u);
+                });
+            }
+        }
+        boolean batchLoaded = !reviewerMap.isEmpty();
+        return reviews.stream()
+                .map(r -> buildReviewResponse(r, batchLoaded
+                        ? reviewerMap.get(r.getReviewerId())
+                        : (userRepository != null ? userRepository.findById(r.getReviewerId()).orElse(null) : null)))
                 .toList();
     }
 
@@ -306,6 +335,10 @@ public class ReviewService {
 
     private ReviewResponse mapToResponse(Review review) {
         User reviewer = userRepository.findById(review.getReviewerId()).orElse(null);
+        return buildReviewResponse(review, reviewer);
+    }
+
+    private ReviewResponse buildReviewResponse(Review review, User reviewer) {
 
         ReviewDisputeStatus disputeStatus = ReviewDisputeStatus.NONE;
         if ("UNDER_DISPUTE".equals(review.getStatus())) {
@@ -484,12 +517,30 @@ public class ReviewService {
 
         if (systemFeedbackRepository == null) return Page.empty();
 
-        return systemFeedbackRepository.findAllByOrderByCreatedAtDesc(pageable)
+        Page<SystemFeedback> fbPage = systemFeedbackRepository.findAllByOrderByCreatedAtDesc(pageable);
+        Set<UUID> userIds = new HashSet<>();
+        fbPage.getContent().forEach(fb -> {
+            if (fb.getUserId() != null) userIds.add(fb.getUserId());
+        });
+        Map<UUID, User> userMap = new HashMap<>();
+        if (!userIds.isEmpty() && userRepository != null) {
+            Iterable<User> fetched = userRepository.findAllById(userIds);
+            if (fetched != null) {
+                fetched.forEach(u -> {
+                    if (u != null && u.getId() != null) userMap.put(u.getId(), u);
+                });
+            }
+        }
+        boolean batchLoaded = !userMap.isEmpty();
+
+        return fbPage
                 .map(fb -> {
                     String userName = "Người dùng ẩn danh";
                     String userRole = "TENANT";
                     if (fb.getUserId() != null && userRepository != null) {
-                        User u = userRepository.findById(fb.getUserId()).orElse(null);
+                        User u = batchLoaded
+                                ? userMap.get(fb.getUserId())
+                                : userRepository.findById(fb.getUserId()).orElse(null);
                         if (u != null) {
                             userName = u.getFullName() != null ? u.getFullName() : u.getEmail();
                             userRole = u.getRole() != null ? u.getRole().name() : "TENANT";
