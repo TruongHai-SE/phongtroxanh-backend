@@ -479,17 +479,24 @@ public class AdminService {
         // Update User TrustScore (+25 points) and mark verified
         userRepository.findById(verification.getUserId()).ifPresent(user -> {
             entityManager.refresh(user, LockModeType.PESSIMISTIC_WRITE);
-            if (Boolean.TRUE.equals(user.getIsVerified())) return;
-            user.setIsVerified(true);
-            userRepository.save(user);
-            int newScore = userService.recalculateAndSyncTrustScore(user.getId());
+            if (!Boolean.TRUE.equals(user.getIsVerified())) {
+                user.setIsVerified(true);
+                userRepository.save(user);
+                int newScore = userService.recalculateAndSyncTrustScore(user.getId());
 
-            trustScoreLogRepository.save(TrustScoreLog.builder()
-                    .userId(user.getId())
-                    .delta(25)
-                    .finalScore(newScore)
-                    .reason("Xác thực Căn cước công dân thành công (+25 điểm)")
-                    .build());
+                trustScoreLogRepository.save(TrustScoreLog.builder()
+                        .userId(user.getId())
+                        .delta(25)
+                        .finalScore(newScore)
+                        .reason("Xác thực Căn cước công dân thành công (+25 điểm)")
+                        .build());
+            }
+
+            List<Room> landlordRooms = roomRepository.findByLandlordIdOrderByCreatedAtDesc(user.getId());
+            if (!landlordRooms.isEmpty()) {
+                landlordRooms.forEach(r -> r.setIsVerified(true));
+                roomRepository.saveAll(landlordRooms);
+            }
         });
 
         recordAuditLog("APPROVE_KYC", "USER_VERIFICATION", verificationId, null, "APPROVED");
@@ -617,6 +624,12 @@ public class AdminService {
         user.setIsVerified(verified);
         userRepository.save(user);
         userService.recalculateAndSyncTrustScore(userId);
+
+        List<Room> landlordRooms = roomRepository.findByLandlordIdOrderByCreatedAtDesc(userId);
+        if (!landlordRooms.isEmpty()) {
+            landlordRooms.forEach(r -> r.setIsVerified(verified));
+            roomRepository.saveAll(landlordRooms);
+        }
 
         recordAuditLog(verified ? "GRANT_USER_VERIFIED" : "REVOKE_USER_VERIFIED", "USER", userId, null,
                 verified ? "Cấp tích xanh xác minh thủ công" : "Thu hồi tích xanh xác minh");
