@@ -36,8 +36,11 @@ import vn.phongtroxanh.backend.modules.user.infrastructure.repository.UserReposi
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
@@ -106,7 +109,8 @@ public class RoomSwapService {
         } else {
             swapPage = swapRequestRepository.findByStatusOrderByCreatedAtDesc(SwapStatus.OPEN, pageable);
         }
-        return swapPage.map(this::mapToResponse);
+        List<SwapPostResponse> mapped = mapSwapsBatch(swapPage.getContent());
+        return new org.springframework.data.domain.PageImpl<>(mapped, pageable, swapPage.getTotalElements());
     }
 
     public SwapPostResponse getSwapPostDetail(UUID id) {
@@ -117,9 +121,7 @@ public class RoomSwapService {
 
     public List<SwapPostResponse> getMySwaps() {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
-        return swapRequestRepository.findByRequesterIdOrderByCreatedAtDesc(currentUserId).stream()
-                .map(this::mapToResponse)
-                .toList();
+        return mapSwapsBatch(swapRequestRepository.findByRequesterIdOrderByCreatedAtDesc(currentUserId));
     }
 
     @Transactional
@@ -229,9 +231,7 @@ public class RoomSwapService {
 
     public List<SwapPostResponse> getLandlordRequests() {
         UUID landlordId = SecurityUtils.getCurrentUserId();
-        return swapRequestRepository.findByLandlordIdOrderByCreatedAtDesc(landlordId).stream()
-                .map(this::mapToResponse)
-                .toList();
+        return mapSwapsBatch(swapRequestRepository.findByLandlordIdOrderByCreatedAtDesc(landlordId));
     }
 
     @Transactional
@@ -357,6 +357,68 @@ public class RoomSwapService {
                 .createdAt(swap.getProposalCreatedAt()).build();
     }
 
+    private List<SwapPostResponse> mapSwapsBatch(List<SwapRequest> posts) {
+        if (posts == null || posts.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> userIds = new HashSet<>();
+        Set<UUID> roomIds = new HashSet<>();
+        for (SwapRequest p : posts) {
+            if (p.getRequesterId() != null) userIds.add(p.getRequesterId());
+            if (p.getMatchedTenantId() != null) userIds.add(p.getMatchedTenantId());
+            if (p.getCurrentRoomId() != null) roomIds.add(p.getCurrentRoomId());
+        }
+
+        Map<UUID, User> userMap = new HashMap<>();
+        Map<UUID, UserProfile> profileMap = new HashMap<>();
+        if (!userIds.isEmpty()) {
+            Iterable<User> fetchedUsers = userRepository.findAllById(userIds);
+            if (fetchedUsers != null) {
+                fetchedUsers.forEach(u -> {
+                    if (u != null && u.getId() != null) userMap.put(u.getId(), u);
+                });
+            }
+            Iterable<UserProfile> fetchedProfiles = userProfileRepository.findAllById(userIds);
+            if (fetchedProfiles != null) {
+                fetchedProfiles.forEach(pr -> {
+                    if (pr != null && pr.getUserId() != null) profileMap.put(pr.getUserId(), pr);
+                });
+            }
+        }
+        boolean usersBatchLoaded = !userMap.isEmpty();
+        boolean profilesBatchLoaded = !profileMap.isEmpty();
+
+        Map<UUID, Room> roomMap = new HashMap<>();
+        if (!roomIds.isEmpty()) {
+            Iterable<Room> fetchedRooms = roomRepository.findAllById(roomIds);
+            if (fetchedRooms != null) {
+                fetchedRooms.forEach(rm -> {
+                    if (rm != null && rm.getId() != null) roomMap.put(rm.getId(), rm);
+                });
+            }
+        }
+        boolean roomsBatchLoaded = !roomMap.isEmpty();
+
+        return posts.stream().map(post -> {
+            User requester = usersBatchLoaded
+                    ? userMap.get(post.getRequesterId())
+                    : userRepository.findById(post.getRequesterId()).orElse(null);
+            UserProfile profile = profilesBatchLoaded
+                    ? profileMap.get(post.getRequesterId())
+                    : userProfileRepository.findById(post.getRequesterId()).orElse(null);
+            Room currentRoom = roomsBatchLoaded
+                    ? roomMap.get(post.getCurrentRoomId())
+                    : roomRepository.findById(post.getCurrentRoomId()).orElse(null);
+            User matchedUser = post.getMatchedTenantId() != null
+                    ? (usersBatchLoaded ? userMap.get(post.getMatchedTenantId()) : userRepository.findById(post.getMatchedTenantId()).orElse(null))
+                    : null;
+            UserProfile matchedProfile = post.getMatchedTenantId() != null
+                    ? (profilesBatchLoaded ? profileMap.get(post.getMatchedTenantId()) : userProfileRepository.findById(post.getMatchedTenantId()).orElse(null))
+                    : null;
+            return buildSwapPostResponse(post, requester, profile, currentRoom, matchedUser, matchedProfile);
+        }).toList();
+    }
+
     private SwapPostResponse mapToResponse(SwapRequest post) {
         User requester = userRepository.findById(post.getRequesterId()).orElse(null);
         UserProfile profile = userProfileRepository.findById(post.getRequesterId()).orElse(null);
@@ -368,6 +430,12 @@ public class RoomSwapService {
         UserProfile matchedProfile = post.getMatchedTenantId() != null
                 ? userProfileRepository.findById(post.getMatchedTenantId()).orElse(null)
                 : null;
+
+        return buildSwapPostResponse(post, requester, profile, currentRoom, matchedUser, matchedProfile);
+    }
+
+    private SwapPostResponse buildSwapPostResponse(SwapRequest post, User requester, UserProfile profile,
+                                                   Room currentRoom, User matchedUser, UserProfile matchedProfile) {
 
         List<String> images = (currentRoom != null && currentRoom.getImages() != null)
                 ? currentRoom.getImages().stream().map(RoomImage::getImageUrl).toList()

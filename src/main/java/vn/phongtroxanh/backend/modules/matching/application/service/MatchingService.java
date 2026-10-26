@@ -59,10 +59,29 @@ public class MatchingService {
         activeTenants.addAll(userRepository.findByRoleAndStatus(UserRole.TENANT, UserStatus.WARNED));
         List<RoommateCardDTO> feed = new ArrayList<>();
 
+        List<UUID> candidateIds = activeTenants.stream()
+                .map(User::getId)
+                .filter(id -> id != null && !excludedIds.contains(id))
+                .toList();
+        Map<UUID, UserProfile> profileMap = new HashMap<>();
+        if (!candidateIds.isEmpty()) {
+            Iterable<UserProfile> fetchedProfiles = userProfileRepository.findAllById(candidateIds);
+            if (fetchedProfiles != null) {
+                fetchedProfiles.forEach(p -> {
+                    if (p != null && p.getUserId() != null) {
+                        profileMap.put(p.getUserId(), p);
+                    }
+                });
+            }
+        }
+        boolean profilesBatchLoaded = !profileMap.isEmpty();
+
         for (User u : activeTenants) {
             if (excludedIds.contains(u.getId())) continue;
 
-            UserProfile theirProfile = userProfileRepository.findById(u.getId()).orElse(null);
+            UserProfile theirProfile = profilesBatchLoaded
+                    ? profileMap.get(u.getId())
+                    : userProfileRepository.findById(u.getId()).orElse(null);
             if (theirProfile == null || !Boolean.TRUE.equals(theirProfile.getIsPublic())) continue;
 
             var compatibility = matchingEngine.calculateCompatibility(myProfile, theirProfile);
@@ -206,12 +225,44 @@ public class MatchingService {
     public List<MatchItemDTO> getMatches() {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
         List<Match> matches = matchRepository.findActiveMatchesByUser(currentUserId);
+        if (matches.isEmpty()) {
+            return List.of();
+        }
         List<MatchItemDTO> results = new ArrayList<>();
+
+        Set<UUID> partnerIds = new HashSet<>();
+        for (Match m : matches) {
+            UUID partnerId = m.getUserAId().equals(currentUserId) ? m.getUserBId() : m.getUserAId();
+            if (partnerId != null) partnerIds.add(partnerId);
+        }
+
+        Map<UUID, User> partnerMap = new HashMap<>();
+        Map<UUID, UserProfile> profileMap = new HashMap<>();
+        if (!partnerIds.isEmpty()) {
+            Iterable<User> fetchedUsers = userRepository.findAllById(partnerIds);
+            if (fetchedUsers != null) {
+                fetchedUsers.forEach(u -> {
+                    if (u != null && u.getId() != null) partnerMap.put(u.getId(), u);
+                });
+            }
+            Iterable<UserProfile> fetchedProfiles = userProfileRepository.findAllById(partnerIds);
+            if (fetchedProfiles != null) {
+                fetchedProfiles.forEach(p -> {
+                    if (p != null && p.getUserId() != null) profileMap.put(p.getUserId(), p);
+                });
+            }
+        }
+        boolean usersBatchLoaded = !partnerMap.isEmpty();
+        boolean profilesBatchLoaded = !profileMap.isEmpty();
 
         for (Match m : matches) {
             UUID partnerId = m.getUserAId().equals(currentUserId) ? m.getUserBId() : m.getUserAId();
-            User partner = userRepository.findById(partnerId).orElse(null);
-            UserProfile profile = userProfileRepository.findById(partnerId).orElse(null);
+            User partner = usersBatchLoaded
+                    ? partnerMap.get(partnerId)
+                    : userRepository.findById(partnerId).orElse(null);
+            UserProfile profile = profilesBatchLoaded
+                    ? profileMap.get(partnerId)
+                    : userProfileRepository.findById(partnerId).orElse(null);
 
             UUID conversationId = conversationRepository.findBetweenUsers(currentUserId, partnerId, null)
                     .map(Conversation::getId)
