@@ -71,6 +71,14 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.ok("Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại", null));
     }
 
+    @PostMapping("/change-password")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "API #6b: Đổi mật khẩu khi đang đăng nhập", description = "Kiểm tra mật khẩu hiện tại và cập nhật mật khẩu mới")
+    public ResponseEntity<ApiResponse<Void>> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
+        authService.changePassword(request);
+        return ResponseEntity.ok(ApiResponse.ok("Đổi mật khẩu thành công", null));
+    }
+
     @PostMapping("/refresh-token")
     @Operation(summary = "API #7: Cấp lại accessToken (Token Rotation)", description = "Cấp lại accessToken mới từ refreshToken trong HttpOnly Cookie, đồng thời thu hồi session cũ")
     public ResponseEntity<ApiResponse<AuthResponse>> refreshToken(
