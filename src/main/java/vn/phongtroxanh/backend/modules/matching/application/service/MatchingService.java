@@ -47,6 +47,7 @@ public class MatchingService {
     private final NotificationService notificationService;
     private final EntityManager entityManager;
 
+    @Transactional
     public List<RoommateCardDTO> getDiscoveryFeed() {
         UUID currentUserId = SecurityUtils.getCurrentUserId();
         UserProfile myProfile = userProfileRepository.findById(currentUserId).orElse(null);
@@ -108,6 +109,45 @@ public class MatchingService {
                     .compatibilityScore(compatibility.getTotalScore())
                     .matchHighlights(compatibility.getMatchHighlights())
                     .build());
+        }
+
+        // Smart Cycle Recycling: If all public roommate candidates have been swiped (feed is empty),
+        // recycle DISLIKE swipes (preserving LIKE and mutual MATCH records) so finite candidate pools remain swipeable.
+        if (feed.isEmpty() && !swipedIds.isEmpty()) {
+            swipeRepository.deleteBySwiperIdAndAction(currentUserId, SwipeAction.DISLIKE);
+            List<UUID> remainingSwipedIds = swipeRepository.findSwipedTargetIds(currentUserId);
+            Set<UUID> recycledExcludedIds = new HashSet<>(remainingSwipedIds);
+            recycledExcludedIds.add(currentUserId);
+
+            for (User u : activeTenants) {
+                if (recycledExcludedIds.contains(u.getId())) continue;
+                UserProfile theirProfile = userProfileRepository.findById(u.getId()).orElse(null);
+                if (theirProfile == null || !Boolean.TRUE.equals(theirProfile.getIsPublic())) continue;
+                var compatibility = matchingEngine.calculateCompatibility(myProfile, theirProfile);
+                feed.add(RoommateCardDTO.builder()
+                        .userId(u.getId())
+                        .fullName(u.getFullName())
+                        .avatarUrl(u.getAvatarUrl())
+                        .gender(theirProfile.getGender())
+                        .birthDate(theirProfile.getBirthDate())
+                        .schoolOrCompany(Boolean.TRUE.equals(theirProfile.getShowSchool()) ? theirProfile.getSchoolOrCompany() : null)
+                        .bio(theirProfile.getBio())
+                        .trustScore(u.getTrustScore())
+                        .budgetMin(theirProfile.getBudgetMin())
+                        .budgetMax(theirProfile.getBudgetMax())
+                        .preferredDistricts(theirProfile.getPreferredDistricts())
+                        .interests(theirProfile.getInterests())
+                        .galleryImages(theirProfile.getGalleryImages())
+                        .earlySleeper(theirProfile.getEarlySleeper())
+                        .isNeat(theirProfile.getIsNeat())
+                        .allowGuests(theirProfile.getAllowGuests())
+                        .nonSmoking(theirProfile.getNonSmoking())
+                        .noiseTolerance(theirProfile.getNoiseTolerance())
+                        .compatibilityScore(compatibility.getTotalScore())
+                        .matchHighlights(compatibility.getMatchHighlights())
+                        .build());
+            }
+            log.info("Auto-recycled roommate DISLIKE swipes for user {}", currentUserId);
         }
 
         Set<UUID> boostedIds = new HashSet<>();
