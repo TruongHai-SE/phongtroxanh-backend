@@ -183,13 +183,16 @@ public class ChatService {
             throw new BadRequestException("INVALID_MESSAGE", "Tin nhắn cần hội thoại và nội dung từ 1 đến 2000 ký tự");
         }
         if (attachmentUrl != null && !attachmentUrl.isBlank()) {
-            try {
-                var uri = java.net.URI.create(attachmentUrl);
-                if (attachmentUrl.length() > 2000 || !"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null) {
-                    throw new IllegalArgumentException();
+            boolean isDataImage = attachmentUrl.startsWith("data:image/") && attachmentUrl.length() <= 8_000_000;
+            if (!isDataImage) {
+                try {
+                    var uri = java.net.URI.create(attachmentUrl);
+                    if (attachmentUrl.length() > 2000 || !"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null) {
+                        throw new IllegalArgumentException();
+                    }
+                } catch (IllegalArgumentException ex) {
+                    throw new BadRequestException("INVALID_ATTACHMENT", "Đường dẫn tệp đính kèm phải là HTTPS hoặc ảnh hợp lệ");
                 }
-            } catch (IllegalArgumentException ex) {
-                throw new BadRequestException("INVALID_ATTACHMENT", "Đường dẫn tệp đính kèm phải là HTTPS hợp lệ");
             }
         }
         Conversation c = conversationRepository.findById(conversationId)
