@@ -21,6 +21,8 @@ public interface SwipeRepository extends JpaRepository<Swipe, UUID> {
     @Query("SELECT s.targetId FROM Swipe s WHERE s.swiperId = :swiperId")
     List<UUID> findSwipedTargetIds(@Param("swiperId") UUID swiperId);
 
+    void deleteBySwiperIdAndAction(UUID swiperId, SwipeAction action);
+
     @Query("SELECT s FROM Swipe s WHERE s.swiperId = :targetId AND s.targetId = :swiperId AND s.action IN (:actions)")
     Optional<Swipe> findReverseSwipe(
             @Param("swiperId") UUID swiperId,

@@ -249,6 +249,27 @@ public class AuthService {
     }
 
     @Transactional
+    public void changePassword(ChangePasswordRequest request) {
+        UUID currentUserId = SecurityUtils.getCurrentUserId();
+        User user = userRepository.findById(currentUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("USER_NOT_FOUND", "Không tìm thấy tài khoản"));
+        assertActive(user);
+
+        if (user.getPasswordHash() == null || !passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
+            throw new BadRequestException("INVALID_PASSWORD", "Mật khẩu hiện tại không chính xác");
+        }
+        if (request.getCurrentPassword().equals(request.getNewPassword())) {
+            throw new BadRequestException("SAME_PASSWORD", "Mật khẩu mới phải khác mật khẩu hiện tại");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        user.setUpdatedAt(Instant.now());
+        userRepository.save(user);
+
+        log.info("Password successfully changed for user {}", user.getId());
+    }
+
+    @Transactional
     public AuthResponse refreshToken(HttpServletRequest request, HttpServletResponse response) {
         String refreshToken = cookieUtils.extractRefreshTokenFromCookie(request);
         if (refreshToken == null || !tokenProvider.validateToken(refreshToken)) {

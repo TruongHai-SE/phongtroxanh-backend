@@ -2,6 +2,7 @@ package vn.phongtroxanh.backend.modules.room.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -16,14 +17,18 @@ import vn.phongtroxanh.backend.common.exception.UnauthorizedException;
 import vn.phongtroxanh.backend.common.location.GeocodingPort;
 import vn.phongtroxanh.backend.common.security.SecurityUtils;
 import vn.phongtroxanh.backend.common.storage.FileStoragePort;
+import vn.phongtroxanh.backend.modules.notification.application.service.NotificationService;
+import vn.phongtroxanh.backend.modules.notification.domain.NotificationType;
 import vn.phongtroxanh.backend.modules.room.domain.*;
 import vn.phongtroxanh.backend.modules.room.infrastructure.repository.RoomRepository;
 import vn.phongtroxanh.backend.modules.room.infrastructure.repository.RoomSwipeRepository;
 import vn.phongtroxanh.backend.modules.room.infrastructure.repository.SavedRoomRepository;
 import vn.phongtroxanh.backend.modules.room.presentation.dto.*;
 import vn.phongtroxanh.backend.modules.user.domain.User;
+import vn.phongtroxanh.backend.modules.user.domain.UserProfile;
 import vn.phongtroxanh.backend.modules.user.domain.UserStatus;
 import vn.phongtroxanh.backend.modules.user.infrastructure.repository.UserConsumableRepository;
+import vn.phongtroxanh.backend.modules.user.infrastructure.repository.UserProfileRepository;
 import vn.phongtroxanh.backend.modules.user.infrastructure.repository.UserRepository;
 
 import java.math.BigDecimal;
@@ -51,6 +56,13 @@ public class RoomService {
     private final GeocodingPort geocodingPort;
     private final RedisTemplate<String, Object> redisTemplate;
 
+    @Autowired(required = false)
+    private UserProfileRepository userProfileRepository;
+
+    @Autowired(required = false)
+    private NotificationService notificationService;
+
+    @Transactional
     public Page<RoomSummaryResponse> searchRooms(
             String district,
             String roomType,
@@ -71,6 +83,18 @@ public class RoomService {
 
         Page<Room> roomPage = roomRepository.searchRooms(
                 district, roomType, minPrice, maxPrice, keyword, sortBy, excludeUserId, pageable);
+
+        // Smart Cycle Recycling: If the user has swiped through all rooms matching the current criteria,
+        // automatically reset their swipe cycle (preserving saved_rooms) so finite datasets support continuous swiping.
+        if (excludeUserId != null && roomPage.isEmpty()) {
+            Page<Room> recycledPage = roomRepository.searchRooms(
+                    district, roomType, minPrice, maxPrice, keyword, sortBy, null, pageable);
+            if (!recycledPage.isEmpty()) {
+                roomSwipeRepository.deleteAllByUserId(excludeUserId);
+                roomPage = recycledPage;
+                log.info("Auto-recycled room swipe cycle for user {}", excludeUserId);
+            }
+        }
 
         return roomPage.map(this::mapToSummaryResponse);
     }
@@ -255,7 +279,7 @@ public class RoomService {
                 .expiresAt(room.getExpiresAt())
                 .images(images)
                 .fees(fees)
-                .amenities(room.getAmenities() != null ? room.getAmenities() : new ArrayList<>())
+                .amenities(normalizeCanonicalAmenities(room.getAmenities()))
                 .landlord(landlordDTO)
                 .build();
     }
@@ -300,7 +324,7 @@ public class RoomService {
                 .isVerified(userRepository.findById(landlordId).map(u -> Boolean.TRUE.equals(u.getIsVerified())).orElse(false))
                 .isBoosted(false)
                 .viewCount(0L)
-                .amenities(request.getAmenities() != null ? new ArrayList<>(request.getAmenities()) : new ArrayList<>())
+                .amenities(normalizeCanonicalAmenities(request.getAmenities()))
                 .images(new ArrayList<>())
                 .fees(new ArrayList<>())
                 .build();
@@ -328,6 +352,7 @@ public class RoomService {
         }
 
         room = roomRepository.save(room);
+        notifyMatchingTenants(room, false);
         return getRoomDetail(room.getId());
     }
 
@@ -366,7 +391,7 @@ public class RoomService {
         if (request.getStatus() != null) room.setStatus(request.getStatus());
 
         if (request.getAmenities() != null) {
-            room.setAmenities(new ArrayList<>(request.getAmenities()));
+            room.setAmenities(normalizeCanonicalAmenities(request.getAmenities()));
         }
 
         if (request.getImages() != null && !request.getImages().isEmpty()) {
@@ -480,7 +505,108 @@ public class RoomService {
         room.setBoostExpiresAt(boostFrom.plus(7, ChronoUnit.DAYS));
         room.setUpdatedAt(Instant.now());
         roomRepository.save(room);
+        notifyMatchingTenants(room, true);
         log.info("Landlord {} boosted room {}", landlordId, roomId);
+    }
+
+    private boolean matchesPreferredRoomType(String roomType, String preferredRoomType) {
+        if (preferredRoomType == null || preferredRoomType.isBlank() || "ALL".equalsIgnoreCase(preferredRoomType.trim())) {
+            return true;
+        }
+        if (roomType == null || roomType.isBlank()) {
+            return false;
+        }
+        String r = roomType.trim().toUpperCase();
+        String p = preferredRoomType.trim().toUpperCase();
+        if (r.equals(p)) return true;
+
+        if ((p.contains("KHÉP KÍN") || p.contains("KHEP KIN") || p.contains("PHÒNG TRỌ") || p.equals("PHONG_KHEP_KIN") || p.equals("PHONG_TRO"))
+                && (r.contains("KHÉP KÍN") || r.contains("KHEP KIN") || r.contains("PHÒNG TRỌ") || r.equals("PHONG_KHEP_KIN") || r.equals("PHONG_TRO"))) {
+            return true;
+        }
+        if ((p.contains("CĂN HỘ") || p.contains("CAN HO") || p.contains("CHUNG CƯ") || p.equals("CAN_HO_MINI") || p.equals("CHUNG_CU_MINI"))
+                && (r.contains("CĂN HỘ") || r.contains("CAN HO") || r.contains("CHUNG CƯ") || r.equals("CAN_HO_MINI") || r.equals("CHUNG_CU_MINI"))) {
+            return true;
+        }
+        if (p.contains("STUDIO") && r.contains("STUDIO")) {
+            return true;
+        }
+        if ((p.contains("SLEEPBOX") || p.contains("Ở GHÉP") || p.contains("KÝ TÚC XÁ") || p.equals("KTX_SLEEPBOX") || p.equals("O_GHEP"))
+                && (r.contains("SLEEPBOX") || r.contains("Ở GHÉP") || r.contains("KÝ TÚC XÁ") || r.equals("KTX_SLEEPBOX") || r.equals("O_GHEP"))) {
+            return true;
+        }
+        return false;
+    }
+
+    private void notifyMatchingTenants(Room room, boolean isBoost) {
+        if (userProfileRepository == null || notificationService == null || room == null || room.getId() == null) {
+            return;
+        }
+        try {
+            String roomDistrict = room.getDistrict() != null ? room.getDistrict().trim().toLowerCase() : "";
+            if (roomDistrict.isEmpty()) return;
+
+            BigDecimal roomPrice = room.getPrice();
+            String roomType = room.getRoomType();
+            List<UserProfile> profiles = userProfileRepository.findAll();
+            for (UserProfile p : profiles) {
+                if (p == null || p.getUserId() == null || p.getUserId().equals(room.getLandlordId())) {
+                    continue;
+                }
+                List<String> prefDistricts = p.getPreferredDistricts();
+                String prefRoomType = p.getPreferredRoomType();
+                boolean hasDistrictPref = prefDistricts != null && !prefDistricts.isEmpty();
+                boolean hasRoomTypePref = prefRoomType != null && !prefRoomType.isBlank() && !"ALL".equalsIgnoreCase(prefRoomType.trim());
+                boolean hasBudgetPref = p.getBudgetMax() != null && p.getBudgetMax().compareTo(BigDecimal.ZERO) > 0;
+
+                if (!hasDistrictPref && !hasRoomTypePref && !hasBudgetPref) {
+                    continue;
+                }
+
+                if (hasDistrictPref) {
+                    boolean districtMatch = prefDistricts.stream()
+                            .filter(Objects::nonNull)
+                            .anyMatch(d -> d.trim().equalsIgnoreCase(roomDistrict) || roomDistrict.contains(d.trim().toLowerCase()));
+                    if (!districtMatch) {
+                        continue;
+                    }
+                }
+
+                if (hasRoomTypePref && !matchesPreferredRoomType(roomType, prefRoomType)) {
+                    continue;
+                }
+
+                if (roomPrice != null) {
+                    if (p.getBudgetMax() != null && p.getBudgetMax().compareTo(BigDecimal.ZERO) > 0) {
+                        BigDecimal maxAllowed = p.getBudgetMax().multiply(BigDecimal.valueOf(1.15));
+                        if (roomPrice.compareTo(maxAllowed) > 0) {
+                            continue;
+                        }
+                    }
+                    if (p.getBudgetMin() != null && p.getBudgetMin().compareTo(BigDecimal.ZERO) > 0) {
+                        BigDecimal minAllowed = p.getBudgetMin().multiply(BigDecimal.valueOf(0.85));
+                        if (roomPrice.compareTo(minAllowed) < 0) {
+                            continue;
+                        }
+                    }
+                }
+
+                String title = isBoost
+                        ? "Phòng nổi bật phù hợp tại " + room.getDistrict()
+                        : "Phòng phù hợp mới tại " + room.getDistrict();
+                String priceStr = roomPrice != null ? String.format("%,.0fđ/tháng", roomPrice) : "Giá tốt";
+                String body = room.getTitle() + " (" + priceStr + ") khớp với tiêu chí tìm phòng bạn đã đăng ký.";
+                notificationService.create(
+                        p.getUserId(),
+                        title,
+                        body,
+                        NotificationType.SYSTEM,
+                        Map.of("roomId", room.getId().toString(), "category", "matching_room")
+                );
+            }
+        } catch (Exception ex) {
+            log.debug("Could not dispatch matching room notifications for room {}: {}", room.getId(), ex.getMessage());
+        }
     }
 
     @Transactional
@@ -749,10 +875,47 @@ public class RoomService {
                 .viewCount(r.getViewCount())
                 .primaryImageUrl(primaryImage)
                 .images(imageUrls)
-                .amenities(r.getAmenities() != null ? r.getAmenities() : new ArrayList<>())
+                .amenities(normalizeCanonicalAmenities(r.getAmenities()))
                 .createdAt(r.getCreatedAt())
                 .expiresAt(r.getExpiresAt())
                 .build();
+    }
+
+    private static final List<String> CANONICAL_AMENITIES = List.of(
+            "Máy lạnh", "Wi-Fi", "WC riêng", "Giờ tự do", "Bãi xe",
+            "Bếp riêng", "Ban công", "Thang máy", "Gác lửng", "An ninh 24/7"
+    );
+
+    private List<String> normalizeCanonicalAmenities(List<String> raw) {
+        if (raw == null || raw.isEmpty()) return new ArrayList<>();
+        Set<String> result = new java.util.LinkedHashSet<>();
+        for (String item : raw) {
+            if (item == null) continue;
+            String trimmed = item.trim();
+            if (trimmed.isEmpty()) continue;
+            if (CANONICAL_AMENITIES.contains(trimmed)) {
+                result.add(trimmed);
+                continue;
+            }
+            String upper = trimmed.toUpperCase();
+            switch (upper) {
+                case "WIFI", "WI-FI" -> result.add("Wi-Fi");
+                case "AIR_CONDITIONER", "MAY LANH", "MÁY LẠNH" -> result.add("Máy lạnh");
+                case "PRIVATE_BATHROOM", "WC RIENG", "WC RIÊNG" -> result.add("WC riêng");
+                case "FREE_HOURS", "FREE_TIME", "GIO TU DO", "GIỜ TỰ DO" -> result.add("Giờ tự do");
+                case "PARKING", "BAI XE", "BÃI XE" -> result.add("Bãi xe");
+                case "KITCHEN", "BEP RIENG", "BẾP RIÊNG", "SHARED_KITCHEN", "BẾP CHUNG" -> result.add("Bếp riêng");
+                case "BALCONY", "BAN CONG", "BAN CÔNG" -> result.add("Ban công");
+                case "ELEVATOR", "THANG MAY", "THANG MÁY" -> result.add("Thang máy");
+                case "MEZZANINE", "GAC LUNG", "GÁC LỬNG" -> result.add("Gác lửng");
+                case "SECURITY", "SECURITY_24_7", "AN NINH 24/7", "BẢO VỆ 24/7", "BAO VE 24/7",
+                     "CAMERA", "CAMERA AN NINH", "FINGERPRINT_LOCK", "KHÓA VÂN TAY", "KHOA VAN TAY" -> result.add("An ninh 24/7");
+                default -> {
+                    // Ignore non-canonical / arbitrary tags to prevent filter spam
+                }
+            }
+        }
+        return new ArrayList<>(result);
     }
 
     private void validateDuplicateRoom(UUID landlordId, CreateRoomRequest request) {
