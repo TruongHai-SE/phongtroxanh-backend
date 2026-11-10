@@ -16,4 +16,13 @@ public class GoogleLoginRequest {
 
     @Builder.Default
     private UserRole role = UserRole.TENANT;
+
+    @Builder.Default
+    private String trafficSource = "direct";
+
+    public GoogleLoginRequest(String idToken, UserRole role) {
+        this.idToken = idToken;
+        this.role = role;
+        this.trafficSource = "direct";
+    }
 }
