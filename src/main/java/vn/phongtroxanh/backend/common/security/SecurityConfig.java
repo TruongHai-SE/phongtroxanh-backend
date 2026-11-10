@@ -119,7 +119,7 @@ public class SecurityConfig {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOriginPatterns(List.of("*"));
         config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Request-ID", "Idempotency-Key"));
+        config.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Request-ID", "Idempotency-Key", "X-Traffic-Source"));
         config.setExposedHeaders(List.of("X-Request-ID", "Set-Cookie"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);

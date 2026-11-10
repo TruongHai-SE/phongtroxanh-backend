@@ -80,6 +80,7 @@ public class AuthService {
                 .trustScore(50)
                 .isVerified(false)
                 .lastActiveAt(Instant.now())
+                .trafficSource(resolveTrafficSource(request.getTrafficSource()))
                 .build();
 
         user = userRepository.save(user);
@@ -429,6 +430,7 @@ public class AuthService {
                     .trustScore(50)
                     .isVerified(false) // Email verification does not establish KYC
                     .lastActiveAt(Instant.now())
+                    .trafficSource(resolveTrafficSource(request.getTrafficSource()))
                     .build();
             newUser = userRepository.save(newUser);
 
@@ -768,5 +770,29 @@ public class AuthService {
         }
 
         return builder.build();
+    }
+
+    private String resolveTrafficSource(String bodySource) {
+        String candidate = bodySource;
+        if (candidate == null || candidate.isBlank() || "direct".equalsIgnoreCase(candidate.trim())) {
+            try {
+                var attrs = org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+                if (attrs instanceof org.springframework.web.context.request.ServletRequestAttributes sra) {
+                    String headerSource = sra.getRequest().getHeader("X-Traffic-Source");
+                    if (headerSource != null && !headerSource.isBlank()) {
+                        candidate = headerSource;
+                    }
+                }
+            } catch (Exception ignored) {
+                // Ignore if outside HTTP request context (e.g. unit tests)
+            }
+        }
+        if (candidate == null) return "direct";
+        String s = candidate.toLowerCase().trim();
+        if (s.contains("facebook") || s.contains("fb") || s.contains("messenger") || s.contains("instagram")) return "facebook";
+        if (s.contains("tiktok")) return "tiktok";
+        if (s.contains("zalo")) return "zalo";
+        if (s.contains("google")) return "google";
+        return "direct";
     }
 }

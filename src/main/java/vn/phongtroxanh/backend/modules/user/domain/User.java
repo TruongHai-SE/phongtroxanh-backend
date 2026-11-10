@@ -57,4 +57,8 @@ public class User extends BaseEntity {
     @Column(name = "last_active_at")
     @Builder.Default
     private Instant lastActiveAt = Instant.now();
+
+    @Column(name = "traffic_source", length = 30, nullable = false)
+    @Builder.Default
+    private String trafficSource = "direct";
 }

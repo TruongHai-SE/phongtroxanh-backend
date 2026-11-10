@@ -102,9 +102,9 @@ public class AdminService {
 
         List<Rental> allRentals = rentalRepository.findAll();
 
-        long totalUsers = allUsers.size();
         long totalLandlords = allUsers.stream().filter(u -> u.getRole() == UserRole.LANDLORD).count();
         long totalTenants = allUsers.stream().filter(u -> u.getRole() == UserRole.TENANT).count();
+        long totalUsers = totalLandlords + totalTenants;
         long totalRooms = !allRoomsList.isEmpty() ? allRoomsList.size() : roomRepository.count();
         long activeRooms = allRoomsList.stream().filter(r -> r.getStatus() == RoomStatus.AVAILABLE).count();
         long totalMatches = matchRepository.count();
