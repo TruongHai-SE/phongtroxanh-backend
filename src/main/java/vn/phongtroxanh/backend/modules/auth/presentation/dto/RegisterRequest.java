@@ -30,4 +30,16 @@ public class RegisterRequest {
 
     @Builder.Default
     private UserRole role = UserRole.TENANT;
+
+    @Builder.Default
+    private String trafficSource = "direct";
+
+    public RegisterRequest(String email, String phoneNumber, String password, String fullName, UserRole role) {
+        this.email = email;
+        this.phoneNumber = phoneNumber;
+        this.password = password;
+        this.fullName = fullName;
+        this.role = role;
+        this.trafficSource = "direct";
+    }
 }
