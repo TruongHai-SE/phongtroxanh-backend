@@ -19,8 +19,10 @@ import vn.phongtroxanh.backend.modules.admin.infrastructure.repository.SystemAud
 import vn.phongtroxanh.backend.modules.admin.presentation.dto.*;
 import vn.phongtroxanh.backend.modules.matching.infrastructure.repository.MatchRepository;
 import vn.phongtroxanh.backend.modules.matching.infrastructure.repository.SwipeRepository;
+import vn.phongtroxanh.backend.modules.monetization.domain.PackagePlan;
 import vn.phongtroxanh.backend.modules.monetization.domain.PaymentStatus;
 import vn.phongtroxanh.backend.modules.monetization.domain.PaymentTransaction;
+import vn.phongtroxanh.backend.modules.monetization.infrastructure.repository.PackagePlanRepository;
 import vn.phongtroxanh.backend.modules.monetization.infrastructure.repository.PaymentTransactionRepository;
 import vn.phongtroxanh.backend.modules.rental.domain.Rental;
 import vn.phongtroxanh.backend.modules.rental.domain.RentalStatus;
@@ -62,6 +64,15 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AdminService {
 
+    private static final Map<String, String> CANONICAL_PACKAGE_NAMES = Map.of(
+            "FREE", "Gói Miễn Phí",
+            "PRO_TENANT", "Gói Pro Tìm Bạn & Thuê Phòng",
+            "VIP_TENANT", "Gói VIP Ghép Đôi Siêu Tốc",
+            "LANDLORD_BASIC", "Gói Đẩy Tin Trải Nghiệm",
+            "LANDLORD_VIP", "Gói Chủ Trọ VIP",
+            "LANDLORD_PRO", "Gói Chủ Trọ Chuyên Nghiệp"
+    );
+
     private final UserRepository userRepository;
     private final UserProfileRepository userProfileRepository;
     private final UserConsumableRepository userConsumableRepository;
@@ -76,6 +87,7 @@ public class AdminService {
     private final ReviewRepository reviewRepository;
     private final ReviewDisputeRepository reviewDisputeRepository;
     private final SystemFeedbackRepository systemFeedbackRepository;
+    private final PackagePlanRepository packagePlanRepository;
     private final PaymentTransactionRepository paymentTransactionRepository;
     private final ReportRepository reportRepository;
     private final SystemAuditLogRepository systemAuditLogRepository;
@@ -234,13 +246,22 @@ public class AdminService {
                 })
                 .toList();
 
-        // 5. Thống kê doanh thu theo gói dịch vụ
+        // 5. Thống kê doanh thu theo gói dịch vụ (chuẩn hóa mã gói PayOS về tên hiển thị & sắp xếp giảm dần)
+        Map<String, String> planIdToName = buildPackageDisplayNameMap();
         Map<String, List<PaymentTransaction>> byPlan = successfulTx.stream()
-                .collect(java.util.stream.Collectors.groupingBy(t -> t.getItemName() != null ? t.getItemName() : "Gói dịch vụ"));
+                .collect(java.util.stream.Collectors.groupingBy(
+                        t -> resolvePackageDisplayName(t.getItemName(), planIdToName)
+                ));
         List<AdminDashboardResponse.PackageRevenueDTO> packageStats = new ArrayList<>();
         byPlan.forEach((planName, txList) -> {
             BigDecimal sum = txList.stream().map(PaymentTransaction::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
             packageStats.add(new AdminDashboardResponse.PackageRevenueDTO(planName, planName, sum, (long) txList.size()));
+        });
+        packageStats.sort((a, b) -> {
+            int revCmp = b.getRevenue().compareTo(a.getRevenue());
+            if (revCmp != 0) return revCmp;
+            int countCmp = Long.compare(b.getCount(), a.getCount());
+            return countCmp != 0 ? countCmp : a.getPlanName().compareTo(b.getPlanName());
         });
 
         long activeBoostedRooms = allRoomsList.stream().filter(r -> Boolean.TRUE.equals(r.getIsBoosted())).count();
@@ -886,12 +907,13 @@ public class AdminService {
     public Page<AdminPaymentTransactionResponse> getTransactions(int page, int limit) {
         Pageable pageable = PageRequest.of(Math.max(0, page), Math.min(Math.max(1, limit), 100));
         Page<PaymentTransaction> txs = paymentTransactionRepository.findAllByOrderByCreatedAtDesc(pageable);
+        Map<String, String> planIdToName = buildPackageDisplayNameMap();
 
         return txs.map(t -> AdminPaymentTransactionResponse.builder()
                 .id(t.getId())
                 .userId(t.getUserId())
                 .itemType(t.getItemType())
-                .itemName(t.getItemName())
+                .itemName(resolvePackageDisplayName(t.getItemName(), planIdToName))
                 .amount(t.getAmount())
                 .paymentMethod(t.getPaymentMethod())
                 .status(t.getStatus())
@@ -902,6 +924,32 @@ public class AdminService {
                 .createdAt(t.getCreatedAt())
                 .updatedAt(t.getUpdatedAt())
                 .build());
+    }
+
+    private Map<String, String> buildPackageDisplayNameMap() {
+        Map<String, String> map = new HashMap<>(CANONICAL_PACKAGE_NAMES);
+        if (packagePlanRepository != null) {
+            for (PackagePlan plan : packagePlanRepository.findAll()) {
+                if (plan != null && plan.getId() != null && plan.getName() != null && !plan.getName().isBlank()) {
+                    map.put(plan.getId().trim().toUpperCase(), plan.getName().trim());
+                    map.put(plan.getId().trim(), plan.getName().trim());
+                }
+            }
+        }
+        return map;
+    }
+
+    private String resolvePackageDisplayName(String rawItemName, Map<String, String> planIdToName) {
+        if (rawItemName == null || rawItemName.isBlank()) {
+            return "Gói dịch vụ";
+        }
+        String trimmed = rawItemName.trim();
+        String mapped = planIdToName.get(trimmed);
+        if (mapped != null) {
+            return mapped;
+        }
+        mapped = planIdToName.get(trimmed.toUpperCase());
+        return mapped != null ? mapped : trimmed;
     }
 
     public Page<AdminReportResponse> getReports(ReportStatus status, ReportSeverity severity, int page, int limit) {
